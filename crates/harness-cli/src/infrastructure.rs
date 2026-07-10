@@ -14,8 +14,9 @@ use crate::application::{
     BacklogAddInput, BacklogCloseInput, BrownfieldImportResult, ChangesetApplyResult,
     DbRebuildResult, DecisionAddInput, DecisionVerifyResult, HarnessContext, InitResult,
     IntakeInput, InterventionAddInput, InterventionFilter, MigrateResult, QueryTable,
-    StoryAddInput, StoryBacklogLinkInput, StoryBacklogLinkRecord, StoryDependencyInput,
-    StoryDependencyRecord, StoryUpdateInput, StoryVerifyResult, ToolRegisterInput, TraceInput,
+    StoryAddInput, StoryBacklogLinkInput, StoryBacklogLinkRecord, StoryCompleteResult,
+    StoryDependencyInput, StoryDependencyRecord, StoryUpdateInput, StoryVerifyResult,
+    ToolRegisterInput, TraceInput,
 };
 use crate::domain::{
     compiled_tool_registry, normalize_token, proposal_key, score_context, score_trace, sha256_hex,
@@ -40,6 +41,8 @@ pub enum HarnessInfraError {
     MissingDecisionVerifyCommand(String),
     #[error("story {0} has no verify_command. Configure one with: harness-cli story update --id {0} --verify \"<command>\"")]
     MissingStoryVerifyCommand(String),
+    #[error("story complete: {0}")]
+    StoryCompletion(String),
     #[error("story update: story '{0}' not found")]
     StoryNotFound(String),
     #[error("story dependency: a story cannot depend on itself ('{0}')")]
@@ -127,6 +130,7 @@ pub trait HarnessRepository {
     ) -> Result<Vec<StoryBacklogLinkRecord>>;
     fn query_story_dependencies(&self, story: Option<&str>) -> Result<Vec<StoryDependencyRecord>>;
     fn verify_story(&self, id: &str) -> Result<StoryVerifyResult>;
+    fn complete_story(&self, id: &str) -> Result<StoryCompleteResult>;
     fn verify_all_stories(&self) -> Result<StoryVerifyAllResult>;
     fn add_decision(&self, input: DecisionAddInput) -> Result<()>;
     fn verify_decision(&self, id: &str) -> Result<DecisionVerifyResult>;
@@ -1087,6 +1091,100 @@ impl HarnessRepository for SqliteHarnessRepository {
         })
     }
 
+    fn complete_story(&self, id: &str) -> Result<StoryCompleteResult> {
+        let mut connection = self.open_existing()?;
+        let (status, verify_command): (String, Option<String>) = connection
+            .query_row(
+                "SELECT status, verify_command FROM story WHERE id=?1;",
+                params![id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| HarnessInfraError::StoryNotFound(id.to_owned()))?;
+        if status == "implemented" {
+            return Ok(StoryCompleteResult {
+                command: verify_command.unwrap_or_default(),
+                stdout: String::new(),
+                stderr: String::new(),
+                result: "already-completed".to_owned(),
+                closed_backlog_ids: vec![],
+            });
+        }
+        if !matches!(status.as_str(), "in_progress" | "changed") {
+            return Err(HarnessInfraError::StoryCompletion(format!("story '{id}' has status '{status}'; move it to in_progress or changed before completion")));
+        }
+        let verify_command = verify_command
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| HarnessInfraError::MissingStoryVerifyCommand(id.to_owned()))?;
+        let resolver_count: i64 = connection.query_row("SELECT COUNT(*) FROM story_backlog_link WHERE story_id=?1 AND relationship='resolves';", params![id], |row| row.get(0))?;
+        if resolver_count > 0 {
+            let valid_intake: Option<String> = connection.query_row(
+                "SELECT uid FROM intake WHERE story_id=?1 AND input_type='harness_improvement' AND uid IS NOT NULL ORDER BY id DESC LIMIT 1;", params![id], |row| row.get(0)
+            ).optional()?;
+            let intake_uid = valid_intake.ok_or_else(|| HarnessInfraError::StoryCompletion("resolver stories require a linked harness_improvement intake with stable identity".to_owned()))?;
+            let trace_ok: Option<i64> = connection.query_row(
+                "SELECT trace.id FROM trace WHERE trace.story_id=?1 AND trace.intake_uid=?2 AND trace.outcome='completed' AND COALESCE(trace.actions_taken,'') NOT IN ('','[]') AND COALESCE(trace.files_changed,'') NOT IN ('','[]') AND trace.created_at >= (SELECT MAX(linked_at) FROM story_backlog_link WHERE story_id=?1 AND relationship='resolves') ORDER BY trace.id DESC LIMIT 1;", params![id, intake_uid], |row| row.get(0)
+            ).optional()?;
+            if trace_ok.is_none() {
+                return Err(HarnessInfraError::StoryCompletion("resolver stories require a completed linked implementation trace recorded after the newest resolver link".to_owned()));
+            }
+            let invalid_target: Option<(i64, String, Option<String>)> = connection.query_row(
+                "SELECT backlog.id, backlog.status, json_extract(backlog.resolution_evidence, '$.story_id') FROM story_backlog_link link JOIN backlog ON backlog.uid=link.backlog_uid WHERE link.story_id=?1 AND link.relationship='resolves' AND NOT (backlog.status='accepted' OR (backlog.status='implemented' AND json_extract(backlog.resolution_evidence, '$.story_id')=?1)) LIMIT 1;", params![id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            ).optional()?;
+            if let Some((backlog_id, backlog_status, _)) = invalid_target {
+                return Err(HarnessInfraError::StoryCompletion(format!("resolver target #{backlog_id} is '{backlog_status}', not accepted or already completed by this story")));
+            }
+        }
+        let (shell, flag) = verifier_shell();
+        let output = Command::new(shell)
+            .arg(flag)
+            .arg(&verify_command)
+            .current_dir(&self.repo_root)
+            .env_remove("HARNESS_RUN_ID")
+            .env_remove("HARNESS_RUN_MODE")
+            .env_remove("HARNESS_DB_PATH")
+            .output()?;
+        let result = if output.status.success() {
+            "pass"
+        } else {
+            "fail"
+        }
+        .to_owned();
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        if result == "fail" {
+            self.with_logged_write(&mut connection, |tx| { tx.execute("UPDATE story SET last_verified_at=datetime('now'), last_verified_result='fail' WHERE id=?1", params![id])?; Ok(((), vec![json!({"op":"story.verify","version":1,"id":id,"payload":{"result":"fail"}})])) })?;
+            return Ok(StoryCompleteResult {
+                command: verify_command,
+                stdout,
+                stderr,
+                result,
+                closed_backlog_ids: vec![],
+            });
+        }
+        let closed = self.with_logged_write(&mut connection, |tx| {
+            let mut statement = tx.prepare("SELECT backlog.id, backlog.uid, backlog.outcome_schedule_kind FROM story_backlog_link link JOIN backlog ON backlog.uid=link.backlog_uid WHERE link.story_id=?1 AND link.relationship='resolves' AND backlog.status='accepted' ORDER BY backlog.id;")?;
+            let rows = statement.query_map(params![id], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)))?.collect::<std::result::Result<Vec<_>, _>>()?;
+            let trace_count: i64 = tx.query_row("SELECT COUNT(*) FROM trace WHERE uid IS NOT NULL", [], |row| row.get(0))?;
+            tx.execute("UPDATE story SET status='implemented', last_verified_at=datetime('now'), last_verified_result='pass' WHERE id=?1", params![id])?;
+            let mut operations = vec![json!({"op":"story.complete","version":1,"id":id,"payload":{"result":"pass"}})];
+            for (backlog_id, uid, schedule) in &rows {
+                let evidence = json!({"story_id":id,"verify_command":verify_command,"result":"pass"}).to_string();
+                tx.execute("UPDATE backlog SET status='implemented', implemented_at=datetime('now'), closed_at=datetime('now'), resolution_evidence=?1, outcome_baseline_trace_count=CASE WHEN ?2='trace_count' THEN ?3 ELSE outcome_baseline_trace_count END WHERE uid=?4", params![evidence, schedule, trace_count, uid])?;
+                operations.push(json!({"op":"backlog.complete","version":1,"uid":uid,"payload":{"story_id":id,"trace_baseline":trace_count}}));
+                let _ = backlog_id;
+            }
+            Ok((rows.into_iter().map(|row| row.0).collect::<Vec<_>>(), operations))
+        })?;
+        Ok(StoryCompleteResult {
+            command: verify_command,
+            stdout,
+            stderr,
+            result,
+            closed_backlog_ids: closed,
+        })
+    }
+
     fn verify_all_stories(&self) -> Result<StoryVerifyAllResult> {
         let mut connection = self.open_existing()?;
         let mut statement =
@@ -1120,6 +1218,9 @@ impl HarnessRepository for SqliteHarnessRepository {
                 .arg(flag)
                 .arg(&command)
                 .current_dir(&self.repo_root)
+                .env_remove("HARNESS_RUN_ID")
+                .env_remove("HARNESS_RUN_MODE")
+                .env_remove("HARNESS_DB_PATH")
                 .output()?;
             let result = if output.status.success() {
                 "pass"
@@ -3109,6 +3210,20 @@ fn apply_changeset_operation(
                 required_string(operation, "id")?,
             ],
         )?,
+        "story.complete" => transaction.execute(
+            "UPDATE story SET status='implemented', last_verified_at=datetime('now'), last_verified_result=?1 WHERE id=?2;",
+            params![required_string(payload, "result")?, required_string(operation, "id")?],
+        )?,
+        "backlog.complete" => {
+            let uid = required_uid(operation, "uid", "blg")?;
+            let story_id = required_string(payload, "story_id")?;
+            let baseline = optional_i64(payload, "trace_baseline");
+            let evidence = json!({"story_id": story_id, "result":"pass"}).to_string();
+            transaction.execute(
+                "UPDATE backlog SET status='implemented', implemented_at=datetime('now'), closed_at=datetime('now'), resolution_evidence=COALESCE(resolution_evidence, ?1), outcome_baseline_trace_count=COALESCE(?2, outcome_baseline_trace_count) WHERE uid=?3;",
+                params![evidence, baseline, uid],
+            )?
+        }
         "decision.add" => transaction.execute(
             "INSERT INTO decision (id, title, status, doc_path, verify_command, predicted_impact, notes)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
@@ -3430,6 +3545,8 @@ fn optional_i64(value: &Value, field: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, OnceLock};
+
     use tempfile::TempDir;
 
     use super::*;
@@ -3439,6 +3556,19 @@ mod tests {
         ToolRegisterInput, TraceInput,
     };
     use crate::domain::{BacklogFilter, BoolFlag, CsvList, InputType, RiskLane, TraceQualityTier};
+
+    fn run_operation_log_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn env_clean_verification_command() -> &'static str {
+        if cfg!(windows) {
+            "if defined HARNESS_RUN_ID (exit /b 1) else (if defined HARNESS_RUN_MODE (exit /b 1) else (if defined HARNESS_DB_PATH (exit /b 1) else (exit /b 0)))"
+        } else {
+            "test -z \"${HARNESS_RUN_ID-}\" && test -z \"${HARNESS_RUN_MODE-}\" && test -z \"${HARNESS_DB_PATH-}\""
+        }
+    }
 
     fn test_repository() -> (TempDir, SqliteHarnessRepository) {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -4178,6 +4308,54 @@ mod tests {
     }
 
     #[test]
+    fn story_completion_marks_eligible_story_implemented_after_fresh_proof() {
+        let (_temp_dir, repository) = test_repository();
+        repository.init().unwrap();
+        repository
+            .add_story(StoryAddInput {
+                id: "US-COMPLETE".to_owned(),
+                title: "Completion".to_owned(),
+                risk_lane: RiskLane::HighRisk,
+                contract_doc: None,
+                verify_command: Some("echo complete".to_owned()),
+                notes: None,
+            })
+            .unwrap();
+        repository
+            .update_story(StoryUpdateInput {
+                id: "US-COMPLETE".to_owned(),
+                status: Some("in_progress".to_owned()),
+                evidence: None,
+                unit: None,
+                integration: None,
+                e2e: None,
+                platform: None,
+                verify_command: None,
+            })
+            .unwrap();
+
+        let result = repository.complete_story("US-COMPLETE").unwrap();
+        assert_eq!(result.result, "pass");
+        let connection = repository.open_existing().unwrap();
+        let status: String = connection
+            .query_row(
+                "SELECT status FROM story WHERE id='US-COMPLETE'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "implemented");
+        assert!(matches!(
+            repository
+                .complete_story("US-COMPLETE")
+                .unwrap()
+                .result
+                .as_str(),
+            "already-completed"
+        ));
+    }
+
+    #[test]
     fn story_verify_records_pass_fail_and_missing_command() {
         let temp_dir = tempfile::tempdir().unwrap();
         let repo_root = temp_dir.path().join("repo");
@@ -4261,6 +4439,73 @@ mod tests {
             repository.verify_story("US-MISSING"),
             Err(HarnessInfraError::MissingStoryVerifyCommand(id)) if id == "US-MISSING"
         ));
+    }
+
+    #[test]
+    fn validation_subprocesses_do_not_inherit_run_operation_log_env() {
+        let _env_guard = run_operation_log_env_lock().lock().unwrap();
+        let (_temp_dir, repository) = isolated_test_repository();
+        repository.init().unwrap();
+
+        let previous = [
+            ("HARNESS_RUN_ID", env::var_os("HARNESS_RUN_ID")),
+            ("HARNESS_RUN_MODE", env::var_os("HARNESS_RUN_MODE")),
+            ("HARNESS_DB_PATH", env::var_os("HARNESS_DB_PATH")),
+        ];
+        env::set_var("HARNESS_RUN_ID", "run_validation_env");
+        env::set_var("HARNESS_RUN_MODE", "execute");
+        env::set_var("HARNESS_DB_PATH", repository.db_path.as_os_str());
+
+        for (id, status) in [
+            ("US-VERIFY", None),
+            ("US-VERIFY-ALL", None),
+            ("US-COMPLETE-ENV", Some("in_progress")),
+        ] {
+            repository
+                .add_story(StoryAddInput {
+                    id: id.to_owned(),
+                    title: id.to_owned(),
+                    risk_lane: RiskLane::Normal,
+                    contract_doc: None,
+                    verify_command: Some(env_clean_verification_command().to_owned()),
+                    notes: None,
+                })
+                .unwrap();
+            if let Some(status) = status {
+                repository
+                    .update_story(StoryUpdateInput {
+                        id: id.to_owned(),
+                        status: Some(status.to_owned()),
+                        evidence: None,
+                        unit: None,
+                        integration: None,
+                        e2e: None,
+                        platform: None,
+                        verify_command: None,
+                    })
+                    .unwrap();
+            }
+        }
+
+        assert_eq!(repository.verify_story("US-VERIFY").unwrap().result, "pass");
+        assert_eq!(repository.verify_all_stories().unwrap().failed(), 0);
+        assert_eq!(
+            repository.complete_story("US-COMPLETE-ENV").unwrap().result,
+            "pass"
+        );
+
+        let changeset =
+            fs::read_to_string(repository.changeset_path("run_validation_env")).unwrap();
+        assert!(changeset.contains("\"op\":\"story.verify\""));
+        assert!(changeset.contains("\"op\":\"story.complete\""));
+
+        for (key, value) in previous {
+            if let Some(value) = value {
+                env::set_var(key, value);
+            } else {
+                env::remove_var(key);
+            }
+        }
     }
 
     #[test]

@@ -358,6 +358,15 @@ pub fn compiled_tool_registry() -> Vec<ToolEntry> {
         ),
         tool(
             "harness-cli",
+            "story complete",
+            "story complete",
+            "Run fresh proof and atomically complete a story and its resolved backlog work.",
+            &[("id", "string", true)],
+            "Task state",
+            "0.1.11",
+        ),
+        tool(
+            "harness-cli",
             "story verify-all",
             "story verify-all",
             "Run every configured story verification command.",

@@ -254,6 +254,10 @@ impl HarnessService {
         self.repository.verify_story(id)
     }
 
+    pub fn complete_story(&self, id: &str) -> crate::infrastructure::Result<StoryCompleteResult> {
+        self.repository.complete_story(id)
+    }
+
     pub fn verify_all_stories(&self) -> crate::infrastructure::Result<StoryVerifyAllResult> {
         self.repository.verify_all_stories()
     }
@@ -427,6 +431,15 @@ pub struct StoryVerifyResult {
     pub stdout: String,
     pub stderr: String,
     pub result: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct StoryCompleteResult {
+    pub command: String,
+    pub stdout: String,
+    pub stderr: String,
+    pub result: String,
+    pub closed_backlog_ids: Vec<i64>,
 }
 
 #[derive(Debug, PartialEq, Eq)]

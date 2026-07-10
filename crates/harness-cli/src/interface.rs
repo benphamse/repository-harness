@@ -128,6 +128,11 @@ enum StoryAction {
         /// Story id to verify.
         id: String,
     },
+    /// Run fresh proof and atomically mark a completion-eligible story implemented.
+    Complete {
+        /// Story id to complete.
+        id: String,
+    },
     /// Verify every story, skipping stories without verify_command.
     VerifyAll,
 }
@@ -692,6 +697,25 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 print!("{}", result.stdout);
                 print!("{}", result.stderr);
                 println!("Story {id} verification: {}", result.result);
+                if result.result == "fail" {
+                    std::process::exit(1);
+                }
+            }
+            StoryAction::Complete { id } => {
+                let result = service.complete_story(&id)?;
+                println!("Running: {}", result.command);
+                print!("{}", result.stdout);
+                print!("{}", result.stderr);
+                println!(
+                    "Story {id} completion: {}; closed backlog: {}",
+                    result.result,
+                    result
+                        .closed_backlog_ids
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 if result.result == "fail" {
                     std::process::exit(1);
                 }
