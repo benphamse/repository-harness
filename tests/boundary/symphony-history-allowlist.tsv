@@ -33,6 +33,8 @@ exact	scripts/verify-e11-us090.sh	historical_allowed	bootstrap verifier
 exact	scripts/verify-e11-us091.sh	historical_allowed	standalone workspace verifier
 exact	scripts/verify-e11-us098.sh	migration_plan	active cleanup verifier
 exact	scripts/verify-e11-us099.sh	migration_plan	active core regression verifier
+exact	scripts/verify-e11-us100.sh	migration_plan	active cutover verifier
+exact	tests/cutover/released-cross-repo-smoke.sh	migration_plan	released product compatibility fixture
 exact	tests/boundary/assert-harness-only-tree.sh	migration_plan	active ownership boundary
 exact	tests/boundary/assert-symphony-history-allowlist.sh	migration_plan	active history boundary
 exact	tests/boundary/assert-target-symphony-coverage.sh	migration_plan	target ownership proof

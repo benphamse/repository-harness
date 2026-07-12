@@ -6,6 +6,17 @@ both named protocol tuples and cross-repository smokes, the durable-state
 audit, reviewed runtime disposition, and rollback proof. Passing readiness
 does **not** permit story completion; `US-100` must still be `in_progress`.
 
+Before the owner creates the Harness `develop` to `main` PR, run:
+
+```bash
+scripts/verify-e11-us100.sh --develop-candidate
+```
+
+This mode proves the published Symphony release, both pre-merge artifact
+smokes, rollback evidence, and source ownership boundary. It deliberately does
+not claim that the cleaned Harness release, runtime disposition, or observation
+window exists. Those remain mandatory in `--readiness` and `--final`.
+
 `scripts/verify-e11-us100.sh --final` repeats every readiness check and also
 requires `observation-window.json`. That record must prove all of the following:
 

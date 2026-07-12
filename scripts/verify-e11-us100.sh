@@ -6,8 +6,8 @@ EVIDENCE_DIR="${US100_EVIDENCE_DIR:-$ROOT_DIR/docs/stories/epics/E11-symphony-re
 MODE="${1:---final}"
 
 case "$MODE" in
-  --readiness|--final) ;;
-  *) echo "usage: $0 [--readiness|--final]" >&2; exit 2 ;;
+  --develop-candidate|--readiness|--final) ;;
+  *) echo "usage: $0 [--develop-candidate|--readiness|--final]" >&2; exit 2 ;;
 esac
 
 fail() { echo "US-100 verification failed: $*" >&2; exit 1; }
@@ -18,12 +18,13 @@ for command in jq shasum sqlite3; do
 done
 
 RELEASE="$EVIDENCE_DIR/symphony-release.json"
+PREMERGE="$EVIDENCE_DIR/premerge-released-cross-repo-smokes.json"
 CUTOVER="$EVIDENCE_DIR/cutover-readiness.json"
 OBSERVATION="$EVIDENCE_DIR/observation-window.json"
 ROLLBACK="$EVIDENCE_DIR/rollback-rehearsal.json"
 ROLLBACK_SUM="$ROLLBACK.sha256"
 
-for file in "$RELEASE" "$CUTOVER" "$ROLLBACK" "$ROLLBACK_SUM"; do need "$file"; done
+for file in "$RELEASE" "$PREMERGE" "$ROLLBACK" "$ROLLBACK_SUM"; do need "$file"; done
 
 # The sidecar proves that the reviewed rollback record is the record being used.
 (cd "$EVIDENCE_DIR" && shasum -a 256 -c "$(basename "$ROLLBACK_SUM")") >/dev/null \
@@ -62,6 +63,46 @@ jq -e '
   ([.archives[].sha256] | length) == 5 and ([.archives[].sha256] | unique | length) == 5
 ' "$RELEASE" >/dev/null || fail "Symphony release identity or archive checksums do not match the approved release"
 
+# The develop-candidate gate uses the released Symphony artifact against both
+# the immutable protocol control and the cleaned source candidate. This is not
+# a substitute for the later cleaned Harness release tuple.
+jq -e '
+  .schema == "e11-us100-premerge-smokes-v1" and
+  .symphony.tag == "symphony-v0.1.0" and
+  .symphony.source_commit == "2357bc4f333a12794f975a46dbc0df96599fe4c0" and
+  (.scenarios | length) == 2 and
+  ([.scenarios[].name] | sort) == ["cleaned-develop-candidate","initial-protocol-release"] and
+  all(.scenarios[]; .status == "pass" and (.harness_cli_sha256 | test("^[0-9a-f]{64}$"))) and
+  .assertions.checksum_verified == true and
+  .assertions.outside_both_clones == true and
+  .assertions.doctor == true and .assertions.work_list == true and
+  .assertions.prepare_only == true and .assertions.deterministic_execution == true and
+  .assertions.web_health_and_assets == true and
+  .assertions.sync_first_operations == 3 and .assertions.sync_second_operations == 0
+' "$PREMERGE" >/dev/null || fail "pre-merge released cross-repository smoke evidence is incomplete"
+
+DB="${HARNESS_DB_PATH:-$ROOT_DIR/harness.db}"
+need "$DB"
+test "$(sqlite3 "$DB" "SELECT count(*) FROM story WHERE id='US-100' AND status='in_progress';")" = 1 \
+  || fail "US-100 must remain in_progress until final verification and explicit completion"
+
+"$ROOT_DIR/tests/core/assert-durable-state-boundary.sh" >/dev/null \
+  || fail "source durable-state ownership boundary failed"
+
+for path in .agents .codex; do
+  test ! -e "$ROOT_DIR/$path" || fail "active checkout still contains $path"
+done
+if find "$ROOT_DIR/.harness/changesets" -type f -print -quit 2>/dev/null | grep -q .; then
+  fail "active checkout contains live .harness/changesets files"
+fi
+
+if [[ "$MODE" == "--develop-candidate" ]]; then
+  echo "US-100 develop candidate passed; main/release/runtime/observation gates remain pending"
+  exit 0
+fi
+
+need "$CUTOVER"
+
 # Readiness describes the complete cutover tuple. It is deliberately separate
 # from the observation record so it can pass before the seven-day clock closes.
 jq -e '
@@ -86,20 +127,7 @@ jq -e '
   (.recorded_at | fromdateiso8601) > 0
 ' "$CUTOVER" >/dev/null || fail "cutover readiness record is incomplete"
 
-DB="${HARNESS_DB_PATH:-$ROOT_DIR/harness.db}"
-need "$DB"
-test "$(sqlite3 "$DB" "SELECT count(*) FROM story WHERE id='US-100' AND status='in_progress';")" = 1 \
-  || fail "US-100 must remain in_progress until final verification and explicit completion"
-
-"$ROOT_DIR/tests/core/assert-durable-state-boundary.sh" >/dev/null \
-  || fail "source durable-state ownership boundary failed"
-
-for path in .agents .codex .impeccable; do
-  test ! -e "$ROOT_DIR/$path" || fail "active checkout still contains $path"
-done
-if find "$ROOT_DIR/.harness/changesets" -type f -print -quit 2>/dev/null | grep -q .; then
-  fail "active checkout contains live .harness/changesets files"
-fi
+test ! -e "$ROOT_DIR/.impeccable" || fail "active checkout still contains .impeccable"
 
 if [[ "$MODE" == "--readiness" ]]; then
   echo "US-100 pre-observation readiness passed; story remains in_progress"
