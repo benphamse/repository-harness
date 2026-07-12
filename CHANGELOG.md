@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-07-12 - PR #43
+
+- Publish Harness orchestration protocol v1 and E11 separation foundations
+  (@hoangnb24)
+- Develop merge commit: `fa9fe27e2464ae9e60effcb7b8533f027b76a78b`
+- Harness CLI release: `harness-cli-v0.1.14`
+- The immutable `harness-cli-v0.1.12` tag did not publish a release: its
+  verify job exposed and stopped on a child-exit/stdout-reader race in the
+  retained Symphony adapter test. Version 0.1.13 drains final app-server
+  output before classifying process exit.
+- The immutable `harness-cli-v0.1.13` tag also remained unpublished: four
+  native smokes passed, while Windows exposed an open-file rename violation in
+  snapshot finalization. Version 0.1.14 closes the verified temporary database
+  file before its atomic move and improves PowerShell failure diagnostics.
+- Changed surfaces:
+  - `crates/harness-cli/`
+  - `scripts/schema/013-changeset-content-sha.sql`
+  - `scripts/install-harness.sh`
+  - `scripts/install-harness.ps1`
+  - `.github/workflows/harness-cli-release.yml`
+  - `docs/contracts/harness-orchestration-v1.md`
+  - `docs/stories/epics/E11-symphony-repository-separation/`
+  - `tests/protocol/`
+
 ## 2026-07-07 - PR #37
 
 - US-070: completed (@hoangnb24)

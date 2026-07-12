@@ -4,6 +4,8 @@ param(
     [Alias("y")]
     [switch]$Yes,
     [switch]$Merge,
+    [switch]$UpgradeCli,
+    [string]$Ref,
     [switch]$RefreshAgentShim,
     [switch]$Override,
     [switch]$Force,
@@ -46,6 +48,9 @@ function Get-SourceMode {
 }
 
 function Read-RemoteText([string]$Url) {
+    if ($Url.StartsWith("file://")) {
+        return Get-Content -LiteralPath ([uri]$Url).LocalPath -Raw
+    }
     return (Invoke-WebRequest -UseBasicParsing -Uri $Url).Content
 }
 
@@ -60,7 +65,11 @@ function Write-SourceFile([string]$Relative, [string]$Target) {
     }
 
     $url = "$script:SourceBaseUrl/$($Relative -replace '\\','/')"
-    Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $Target
+    if ($url.StartsWith("file://")) {
+        Copy-Item -LiteralPath ([uri]$url).LocalPath -Destination $Target -Force
+    } else {
+        Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $Target
+    }
 }
 
 function Read-PayloadManifest {
@@ -297,7 +306,7 @@ function Install-HarnessCliBinary {
     $checksumUrl = "$binaryUrl.sha256"
     $target = Join-Path $script:TargetDir "scripts/bin/harness-cli.exe"
 
-    if ((Test-Path $target) -and $script:ConflictAction -eq "merge" -and !$Force) {
+    if ((Test-Path $target) -and $script:ConflictAction -eq "merge" -and !$Force -and !$UpgradeCli) {
         Write-Step "skip     scripts/bin/harness-cli.exe (merge keeps existing file)"
         $script:Skipped++
         return
@@ -310,13 +319,20 @@ function Install-HarnessCliBinary {
         return
     }
 
-    $tmpDir = Join-Path ([System.IO.Path]::GetTempPath()) ("harness-cli-" + [guid]::NewGuid().ToString("N"))
+    $targetDir = Split-Path -Parent $target
+    New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+    $tmpDir = Join-Path $targetDir (".harness-cli-upgrade." + [guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null
     try {
         $binaryTmp = Join-Path $tmpDir $binaryName
         $checksumTmp = Join-Path $tmpDir "$binaryName.sha256"
-        Invoke-WebRequest -UseBasicParsing -Uri $binaryUrl -OutFile $binaryTmp
-        Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl -OutFile $checksumTmp
+        if ($binaryUrl.StartsWith("file://")) {
+            Copy-Item -LiteralPath ([uri]$binaryUrl).LocalPath -Destination $binaryTmp
+            Copy-Item -LiteralPath ([uri]$checksumUrl).LocalPath -Destination $checksumTmp
+        } else {
+            Invoke-WebRequest -UseBasicParsing -Uri $binaryUrl -OutFile $binaryTmp
+            Invoke-WebRequest -UseBasicParsing -Uri $checksumUrl -OutFile $checksumTmp
+        }
 
         $expected = ((Get-Content -LiteralPath $checksumTmp -Raw) -split "\s+")[0].ToLowerInvariant()
         if ([string]::IsNullOrWhiteSpace($expected)) {
@@ -327,9 +343,8 @@ function Install-HarnessCliBinary {
             Fail "Checksum mismatch for $binaryName`: expected $expected, got $actual"
         }
 
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
         if (Test-Path $target) {
-            if ($Force) {
+            if ($Force -or $UpgradeCli) {
                 $backup = Join-Path $script:BackupDir "scripts/bin/harness-cli.exe"
                 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
                 Copy-Item -LiteralPath $target -Destination $backup -Force
@@ -340,7 +355,12 @@ function Install-HarnessCliBinary {
             $script:Created++
             Write-Step "created  scripts/bin/harness-cli.exe"
         }
-        Copy-Item -LiteralPath $binaryTmp -Destination $target -Force
+        if (Test-Path $target) {
+            $replacementBackup = Join-Path $tmpDir "replaced-harness-cli.exe"
+            [System.IO.File]::Replace($binaryTmp, $target, $replacementBackup)
+        } else {
+            Move-Item -LiteralPath $binaryTmp -Destination $target
+        }
         Write-Step "verified scripts/bin/harness-cli.exe ($platform)"
     } finally {
         Remove-Item -LiteralPath $tmpDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -355,6 +375,22 @@ $script:SourceBaseUrl = if ($env:HARNESS_SOURCE_BASE_URL) { $env:HARNESS_SOURCE_
 $script:PayloadManifest = "scripts/harness-install-files.txt"
 $script:SchemaDir = "scripts/schema"
 $script:CliBaseUrl = if ($env:HARNESS_CLI_BASE_URL) { $env:HARNESS_CLI_BASE_URL.TrimEnd("/") } else { Get-DefaultCliBaseUrl }
+
+if (!$UpgradeCli -and ![string]::IsNullOrWhiteSpace($Ref)) {
+    Fail "-Ref is valid only with -UpgradeCli"
+}
+
+if ($UpgradeCli) {
+    if ([string]::IsNullOrWhiteSpace($Ref)) {
+        Fail "-UpgradeCli requires -Ref <harness-cli-vX.Y.Z>"
+    }
+    if ($Ref -notmatch '^harness-cli-v[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9]+)*$') {
+        Fail "-Ref must be an immutable Harness CLI release tag such as harness-cli-v0.1.14"
+    }
+    $script:Source = @{ Mode = "remote"; Root = "" }
+    $script:SourceBaseUrl = if ($env:HARNESS_SOURCE_BASE_URL) { $env:HARNESS_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/hoangnb24/repository-harness/$Ref" }
+    $script:CliBaseUrl = if ($env:HARNESS_CLI_BASE_URL) { $env:HARNESS_CLI_BASE_URL.TrimEnd("/") } else { "https://github.com/hoangnb24/repository-harness/releases/download/$Ref" }
+}
 $script:TargetDir = Resolve-TargetPath $Directory
 $script:BackupDir = Join-Path $script:TargetDir (".harness-backup/" + (Get-Date -Format "yyyyMMddHHmmss"))
 $script:ConflictAction = "install"

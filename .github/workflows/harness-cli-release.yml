@@ -3,7 +3,6 @@ name: Harness CLI Release
 on:
   push:
     tags:
-      - "v*"
       - "harness-cli-v*"
   workflow_dispatch:
     inputs:
@@ -37,20 +36,42 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Verify release tag, source, and crate identity
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_tag != '' }}
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: scripts/verify-harness-cli-release-identity.sh "$RELEASE_TAG"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt -p harness-cli -- --check
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test -p harness-cli --locked
+
+      - name: Run clippy
+        run: cargo clippy -p harness-cli --all-targets --locked -- -D warnings
 
       - name: Check shell scripts
         run: |
           bash -n scripts/install-harness.sh
           bash -n scripts/build-harness-cli-release.sh
+
+      - name: Smoke Bash installer modes
+        run: tests/installer/test-install-harness-modes.sh
+
+      - name: Verify installer and maintenance contracts
+        run: |
+          tests/installer/assert-install-manifest-links.sh
+          tests/installer/assert-consumer-changeset-trackable.sh
+          tests/maintenance/test-harness-cli-release-classification.sh
+          tests/maintenance/test-render-changelog-files.sh
+          tests/release/test-release-workflow-contract.sh
+          tests/release/test-release-identity-guard.sh
 
   build:
     name: Build ${{ matrix.platform }}
@@ -85,6 +106,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.checkout_ref || github.ref }}
+          fetch-depth: 0
+
+      - name: Verify release tag, source, and crate identity
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.release_tag != '' }}
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: scripts/verify-harness-cli-release-identity.sh "$RELEASE_TAG"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -95,11 +124,74 @@ jobs:
         shell: bash
         run: scripts/build-harness-cli-release.sh --target "${{ matrix.target }}"
 
-      - name: Smoke built CLI
+      - name: Verify candidate checksum
         shell: bash
         run: |
-          "dist/${{ matrix.binary }}" --help
-          "dist/${{ matrix.binary }}" score-trace --help
+          cd dist
+          if command -v shasum >/dev/null 2>&1; then
+            shasum -a 256 -c "${{ matrix.binary }}.sha256"
+          else
+            sha256sum -c "${{ matrix.binary }}.sha256"
+          fi
+
+      - name: Smoke built CLI
+        if: ${{ matrix.platform != 'windows-x64' }}
+        shell: bash
+        run: tests/protocol/smoke-native-artifact.sh "dist/${{ matrix.binary }}"
+
+      - name: Smoke built CLI on Windows
+        if: ${{ matrix.platform == 'windows-x64' }}
+        shell: pwsh
+        run: tests/protocol/smoke-native-artifact.ps1 -Artifact "dist/${{ matrix.binary }}"
+
+      - name: Download initial protocol artifact
+        shell: bash
+        run: |
+          curl -fsSL \
+            "https://github.com/hoangnb24/repository-harness/releases/download/harness-cli-v0.1.14/${{ matrix.binary }}" \
+            -o "dist/us092-${{ matrix.binary }}"
+          curl -fsSL \
+            "https://github.com/hoangnb24/repository-harness/releases/download/harness-cli-v0.1.14/${{ matrix.binary }}.sha256" \
+            -o "dist/us092-${{ matrix.binary }}.sha256"
+          expected="$(awk '{print $1}' "dist/us092-${{ matrix.binary }}.sha256")"
+          if command -v shasum >/dev/null 2>&1; then
+            actual="$(shasum -a 256 "dist/us092-${{ matrix.binary }}" | awk '{print $1}')"
+          else
+            actual="$(sha256sum "dist/us092-${{ matrix.binary }}" | awk '{print $1}')"
+          fi
+          [[ "$actual" == "$expected" ]]
+          if [[ "${{ matrix.platform }}" != windows-x64 ]]; then
+            chmod 755 "dist/us092-${{ matrix.binary }}"
+          fi
+
+      - name: Upgrade initial protocol binary to candidate
+        if: ${{ matrix.platform != 'windows-x64' }}
+        shell: bash
+        run: |
+          candidate_ref="${{ inputs.release_tag || github.ref_name }}"
+          if [[ ! "$candidate_ref" =~ ^harness-cli-v[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$ ]]; then
+            candidate_ref=harness-cli-v0.0.0-candidate
+          fi
+          tests/installer/test-cli-upgrade-candidate.sh \
+            "dist/us092-${{ matrix.binary }}" \
+            "dist/${{ matrix.binary }}" \
+            "${{ matrix.binary }}" \
+            "$candidate_ref"
+
+      - name: Smoke PowerShell installer modes and candidate upgrade
+        if: ${{ matrix.platform == 'windows-x64' }}
+        shell: pwsh
+        run: |
+          $candidateRef = "${{ inputs.release_tag || github.ref_name }}"
+          if ($candidateRef -notmatch '^harness-cli-v[0-9]+\.[0-9]+\.[0-9]+(?:[.-][A-Za-z0-9]+)*$') {
+            $candidateRef = "harness-cli-v0.0.0-candidate"
+          }
+          tests/protocol/smoke-native-artifact.ps1 `
+            -Artifact "dist/us092-${{ matrix.binary }}"
+          tests/installer/test-install-harness-modes.ps1 `
+            -CandidateArtifact "dist/${{ matrix.binary }}" `
+            -InitialArtifact "dist/us092-${{ matrix.binary }}" `
+            -CandidateRef $candidateRef
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

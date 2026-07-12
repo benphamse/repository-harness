@@ -1,15 +1,21 @@
 use std::env;
+use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Args, Parser, Subcommand};
 use thiserror::Error;
 
+use crate::epoch_fence::{acquire_command_guard, EpochFenceError};
+
 use crate::application::{
-    BacklogAddInput, BacklogCloseInput, BrownfieldImportResult, ChangesetApplyResult,
-    DbRebuildResult, DecisionAddInput, HarnessContext, HarnessService, InitResult, IntakeInput,
-    InterventionAddInput, InterventionFilter, MigrateResult, QueryTable, StoryAddInput,
-    StoryUpdateInput, ToolRegisterInput, TraceInput,
+    BacklogAddInput, BacklogCloseInput, BacklogOutcomeInput, BrownfieldImportResult,
+    ChangesetApplyResult, DbRebuildResult, DecisionAddInput, HarnessContext, HarnessService,
+    ImprovementHealthResult, InitResult, IntakeInput, InterventionAddInput, InterventionFilter,
+    LegacyReconcileResult, MigrateResult, QueryTable, StoryAddInput, StoryBacklogLinkInput,
+    StoryCasUpdateInput, StoryDependencyInput, StoryHierarchyInput, StoryUpdateInput,
+    ToolRegisterInput, TraceInput,
 };
 use crate::domain::{
     normalize_capability, parse_optional_integer, parse_tool_args, proof_display,
@@ -18,7 +24,7 @@ use crate::domain::{
     InputType, IntakeRecord, InterventionRecord, RiskLane, StoryMatrixRecord, StoryVerifyAllResult,
     ToolEntry, TraceQualityTier, TraceRecord, TraceScoreResult, RISK_LANE_HELP,
 };
-use crate::infrastructure::ToolCheckResult;
+use crate::infrastructure::{ProposalDecision, ProposalResult, ToolCheckResult};
 
 #[derive(Parser, Debug)]
 #[command(name = "harness-cli")]
@@ -56,13 +62,20 @@ enum Command {
     /// Score trace context reads against CONTEXT_RULES.md.
     ScoreContext { trace_id: String },
     /// Run drift audit and entropy score.
-    Audit,
+    Audit(AuditArgs),
     /// Generate improvement proposals from observed patterns.
     Propose(ProposeArgs),
     /// Manage harness database changesets.
     Db(DbArgs),
     /// Query harness data.
     Query(QueryArgs),
+}
+
+#[derive(Args, Debug)]
+struct AuditArgs {
+    /// Explicitly persist audit evidence episode transitions.
+    #[arg(long)]
+    record_evidence: bool,
 }
 
 #[derive(Args, Debug)]
@@ -110,6 +123,12 @@ enum StoryAction {
         after_help = "Proof flags use numeric booleans: --unit 1 --integration 1 --e2e 0 --platform 0. Do not use yes/no."
     )]
     Update(StoryUpdateArgs),
+    /// Add or remove a dependency edge where blocker -> blocked.
+    Dependency(StoryDependencyArgs),
+    /// Add or remove a hierarchy edge where parent -> child.
+    Hierarchy(StoryHierarchyArgs),
+    /// Link a story to a stable Harness backlog occurrence.
+    Backlog(StoryBacklogArgs),
     #[command(
         after_help = "story verify only accepts the story id. Configure proof with story add/update --verify, then record proof flags with story update."
     )]
@@ -117,8 +136,107 @@ enum StoryAction {
         /// Story id to verify.
         id: String,
     },
+    /// Run fresh proof and atomically mark a completion-eligible story implemented.
+    Complete {
+        /// Story id to complete.
+        id: String,
+        /// Emit the protocol-v1 machine envelope.
+        #[arg(long)]
+        json: bool,
+    },
     /// Verify every story, skipping stories without verify_command.
     VerifyAll,
+}
+
+#[derive(Args, Debug)]
+struct StoryDependencyArgs {
+    #[command(subcommand)]
+    action: StoryDependencyAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum StoryDependencyAction {
+    /// Add a cycle-safe dependency edge.
+    Add(StoryDependencyMutationArgs),
+    /// Remove a dependency edge; a missing edge is unchanged.
+    Remove(StoryDependencyMutationArgs),
+}
+
+#[derive(Args, Debug)]
+struct StoryBacklogArgs {
+    #[command(subcommand)]
+    action: StoryBacklogAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum StoryBacklogAction {
+    Link(StoryBacklogLinkArgs),
+    Unlink(StoryBacklogUnlinkArgs),
+    List(StoryBacklogListArgs),
+}
+
+#[derive(Args, Debug)]
+struct StoryBacklogLinkArgs {
+    #[arg(long)]
+    story: String,
+    #[arg(long)]
+    backlog: String,
+    #[arg(long, value_parser = ["resolves", "references"])]
+    relationship: String,
+}
+
+#[derive(Args, Debug)]
+struct StoryBacklogUnlinkArgs {
+    #[arg(long)]
+    story: String,
+    #[arg(long)]
+    backlog: String,
+}
+
+#[derive(Args, Debug)]
+struct StoryBacklogListArgs {
+    #[arg(long)]
+    story: Option<String>,
+    #[arg(long)]
+    backlog: Option<String>,
+}
+
+#[derive(Args, Debug)]
+struct StoryDependencyMutationArgs {
+    /// The story that must complete first.
+    #[arg(long)]
+    blocker: String,
+    /// The story blocked by --blocker.
+    #[arg(long)]
+    blocked: String,
+    /// Emit the protocol-v1 machine envelope.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args, Debug)]
+struct StoryHierarchyArgs {
+    #[command(subcommand)]
+    action: StoryHierarchyAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum StoryHierarchyAction {
+    /// Add a cycle-safe parent/child edge.
+    Add(StoryHierarchyMutationArgs),
+    /// Remove a parent/child edge; a missing edge is unchanged.
+    Remove(StoryHierarchyMutationArgs),
+}
+
+#[derive(Args, Debug)]
+struct StoryHierarchyMutationArgs {
+    #[arg(long)]
+    parent: String,
+    #[arg(long)]
+    child: String,
+    /// Emit the protocol-v1 machine envelope.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -135,12 +253,17 @@ struct StoryAddArgs {
     verify: Option<String>,
     #[arg(long)]
     notes: Option<String>,
+    /// Emit the protocol-v1 machine envelope.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
 struct StoryUpdateArgs {
     #[arg(long)]
     id: String,
+    #[arg(long)]
+    contract: Option<String>,
     #[arg(long)]
     status: Option<String>,
     #[arg(long)]
@@ -155,6 +278,15 @@ struct StoryUpdateArgs {
     platform: Option<String>,
     #[arg(long)]
     verify: Option<String>,
+    /// Compare-and-set precondition checked in the write transaction.
+    #[arg(long)]
+    expected_status: Option<String>,
+    /// Require generic runnable state in the same write transaction.
+    #[arg(long)]
+    require_runnable: bool,
+    /// Emit the protocol-v1 machine envelope.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -198,6 +330,43 @@ enum BacklogAction {
     #[command(after_help = RISK_LANE_HELP)]
     Add(BacklogAddArgs),
     Close(BacklogCloseArgs),
+    /// Append a measured outcome for an implemented improvement occurrence.
+    Outcome(BacklogOutcomeArgs),
+    /// Preview or apply conservative legacy lifecycle identity backfill.
+    Reconcile(BacklogReconcileArgs),
+}
+
+#[derive(Args, Debug)]
+struct BacklogReconcileArgs {
+    #[arg(long, value_parser = ["backfill-lifecycle-identity"])]
+    action: String,
+    #[arg(long, conflicts_with = "apply")]
+    dry_run: bool,
+    #[arg(long, conflicts_with = "dry_run")]
+    apply: bool,
+}
+
+#[derive(Args, Debug)]
+struct BacklogOutcomeArgs {
+    #[command(subcommand)]
+    action: BacklogOutcomeAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum BacklogOutcomeAction {
+    Record(BacklogOutcomeRecordArgs),
+}
+
+#[derive(Args, Debug)]
+struct BacklogOutcomeRecordArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long, value_parser = ["confirmed", "ineffective", "reverted"])]
+    status: String,
+    #[arg(long)]
+    outcome: String,
+    #[arg(long)]
+    evidence: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -347,8 +516,24 @@ struct ScoreTraceArgs {
 
 #[derive(Args, Debug)]
 struct ProposeArgs {
+    /// Removed bulk writer. Select one key with --accept or --reject instead.
     #[arg(long)]
     commit: bool,
+    #[arg(long, conflicts_with = "reject")]
+    accept: Option<String>,
+    #[arg(long, conflicts_with = "accept")]
+    reject: Option<String>,
+    #[arg(long)]
+    outcome_manual: bool,
+    #[arg(long)]
+    outcome_due: Option<String>,
+    #[arg(long)]
+    outcome_after_traces: Option<String>,
+    #[arg(long)]
+    reason: Option<String>,
+    /// Include handled occurrences whose current evidence is fully covered.
+    #[arg(long, conflicts_with_all = ["accept", "reject"])]
+    show_suppressed: bool,
 }
 
 #[derive(Args, Debug)]
@@ -360,6 +545,8 @@ struct DbArgs {
 #[derive(Subcommand, Debug)]
 enum DbAction {
     Changeset(ChangesetArgs),
+    /// Create an atomic SQLite online-backup snapshot.
+    Snapshot(SnapshotArgs),
     /// Rebuild a fresh harness database from committed changesets.
     Rebuild {
         #[arg(long = "from")]
@@ -376,7 +563,25 @@ struct ChangesetArgs {
 #[derive(Subcommand, Debug)]
 enum ChangesetAction {
     /// Apply one semantic changeset file idempotently.
-    Apply { path: PathBuf },
+    Apply {
+        path: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect one semantic changeset without changing database state.
+    Status {
+        path: PathBuf,
+        #[arg(long, action = clap::ArgAction::SetTrue, required = true)]
+        json: bool,
+    },
+}
+
+#[derive(Args, Debug)]
+struct SnapshotArgs {
+    #[arg(long)]
+    output: PathBuf,
+    #[arg(long, action = clap::ArgAction::SetTrue, required = true)]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -400,12 +605,25 @@ struct BacklogQueryArgs {
     /// Show only implemented and rejected backlog items.
     #[arg(long)]
     closed: bool,
+    /// Also render relationships for one backlog occurrence.
+    #[arg(long)]
+    id: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
 enum QueryView {
+    /// Discover protocol capabilities and database compatibility without writes.
+    Contract(MachineQueryArgs),
+    /// Read stable story records.
+    Stories(MachineQueryArgs),
+    /// Read stories, dependencies, and hierarchy from one database revision.
+    WorkGraph(MachineQueryArgs),
     /// Test matrix.
     Matrix(MatrixQueryArgs),
+    /// Story dependency edges, optionally filtered to one story.
+    Dependencies(DependenciesQueryArgs),
+    /// Story hierarchy edges, optionally filtered to one story.
+    Hierarchy(HierarchyQueryArgs),
     /// Harness improvement proposals.
     Backlog(BacklogQueryArgs),
     /// Decision records.
@@ -422,8 +640,33 @@ enum QueryView {
     Interventions(InterventionsQueryArgs),
     /// Summary counts.
     Stats,
+    /// Read-only daily view of proposal, implementation, outcome, and recurrence health.
+    ImprovementHealth,
     /// Run arbitrary SQL.
     Sql { query: Vec<String> },
+}
+
+#[derive(Args, Debug)]
+struct DependenciesQueryArgs {
+    /// Show edges where this story is either the blocker or blocked story.
+    #[arg(long)]
+    story: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args, Debug)]
+struct HierarchyQueryArgs {
+    #[arg(long)]
+    story: Option<String>,
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Args, Debug)]
+struct MachineQueryArgs {
+    #[arg(long, action = clap::ArgAction::SetTrue, required = true)]
+    json: bool,
 }
 
 #[derive(Args, Debug)]
@@ -455,6 +698,8 @@ struct InterventionsQueryArgs {
 #[derive(Debug, Error)]
 pub enum InterfaceError {
     #[error("{0}")]
+    InvalidArgument(String),
+    #[error("{0}")]
     ParseHarnessValue(#[from] crate::domain::ParseHarnessValueError),
     #[error("{0}")]
     ToolValidation(#[from] crate::domain::ToolValidationError),
@@ -464,10 +709,237 @@ pub enum InterfaceError {
     CurrentDir(std::io::Error),
     #[error("query sql requires a SQL statement")]
     EmptySql,
+    #[error("machine output exceeds the 16 MiB protocol limit")]
+    MachineOutputTooLarge,
+    #[error("json serialization failed: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("stdout write failed: {0}")]
+    Output(std::io::Error),
+    #[error("path cannot be represented as UTF-8 for protocol JSON")]
+    NonUtf8Path,
+    #[error("{0}")]
+    EpochFence(#[from] EpochFenceError),
+}
+
+const PROTOCOL_VERSION: u32 = 1;
+const MAX_MACHINE_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+
+impl Cli {
+    fn mutates_state(&self) -> bool {
+        match &self.command {
+            Command::Init
+            | Command::Migrate
+            | Command::Import(_)
+            | Command::Intake(_)
+            | Command::Intervention(_)
+            | Command::Trace(_) => true,
+            Command::Story(args) => !matches!(
+                &args.action,
+                StoryAction::Backlog(StoryBacklogArgs {
+                    action: StoryBacklogAction::List(_)
+                })
+            ),
+            Command::Decision(_) | Command::Tool(_) => true,
+            Command::Backlog(args) => !matches!(
+                &args.action,
+                BacklogAction::Reconcile(BacklogReconcileArgs { apply: false, .. })
+            ),
+            Command::Audit(args) => args.record_evidence,
+            Command::Propose(args) => args.commit || args.accept.is_some() || args.reject.is_some(),
+            Command::Db(args) => matches!(
+                &args.action,
+                DbAction::Changeset(ChangesetArgs {
+                    action: ChangesetAction::Apply { .. }
+                }) | DbAction::Rebuild { .. }
+            ),
+            Command::ScoreTrace(_) | Command::ScoreContext { .. } | Command::Query(_) => false,
+        }
+    }
+
+    pub fn machine_mode(&self) -> bool {
+        match &self.command {
+            Command::Story(args) => match &args.action {
+                StoryAction::Add(args) => args.json,
+                StoryAction::Update(args) => args.json,
+                StoryAction::Dependency(args) => match &args.action {
+                    StoryDependencyAction::Add(args) | StoryDependencyAction::Remove(args) => {
+                        args.json
+                    }
+                },
+                StoryAction::Hierarchy(args) => match &args.action {
+                    StoryHierarchyAction::Add(args) | StoryHierarchyAction::Remove(args) => {
+                        args.json
+                    }
+                },
+                StoryAction::Complete { json, .. } => *json,
+                _ => false,
+            },
+            Command::Db(args) => match &args.action {
+                DbAction::Snapshot(args) => args.json,
+                DbAction::Changeset(args) => match &args.action {
+                    ChangesetAction::Apply { json, .. } | ChangesetAction::Status { json, .. } => {
+                        *json
+                    }
+                },
+                DbAction::Rebuild { .. } => false,
+            },
+            Command::Query(args) => match &args.view {
+                QueryView::Contract(args)
+                | QueryView::Stories(args)
+                | QueryView::WorkGraph(args) => args.json,
+                QueryView::Dependencies(args) => args.json,
+                QueryView::Hierarchy(args) => args.json,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    pub fn machine_operation(&self) -> &'static str {
+        match &self.command {
+            Command::Story(args) => match &args.action {
+                StoryAction::Add(_) => "story.add",
+                StoryAction::Update(_) => "story.update",
+                StoryAction::Dependency(args) => match &args.action {
+                    StoryDependencyAction::Add(_) => "story.dependency.add",
+                    StoryDependencyAction::Remove(_) => "story.dependency.remove",
+                },
+                StoryAction::Hierarchy(args) => match &args.action {
+                    StoryHierarchyAction::Add(_) => "story.hierarchy.add",
+                    StoryHierarchyAction::Remove(_) => "story.hierarchy.remove",
+                },
+                StoryAction::Complete { .. } => "story.complete",
+                _ => "story",
+            },
+            Command::Db(args) => match &args.action {
+                DbAction::Snapshot(_) => "db.snapshot",
+                DbAction::Changeset(args) => match &args.action {
+                    ChangesetAction::Apply { .. } => "db.changeset.apply",
+                    ChangesetAction::Status { .. } => "db.changeset.status",
+                },
+                DbAction::Rebuild { .. } => "db.rebuild",
+            },
+            Command::Query(args) => match &args.view {
+                QueryView::Contract(_) => "query.contract",
+                QueryView::Stories(_) => "query.stories",
+                QueryView::WorkGraph(_) => "query.work-graph",
+                QueryView::Dependencies(_) => "query.dependencies",
+                QueryView::Hierarchy(_) => "query.hierarchy",
+                _ => "query",
+            },
+            _ => "harness-cli",
+        }
+    }
+}
+
+fn request_id() -> String {
+    if let Ok(value) = env::var("HARNESS_REQUEST_ID") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return trimmed.chars().take(128).collect();
+        }
+    }
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("req-{}-{nanos}", std::process::id())
+}
+
+fn write_machine_document(value: &serde_json::Value) -> Result<(), InterfaceError> {
+    let mut output = serde_json::to_vec(value)?;
+    if output.len() + 1 > MAX_MACHINE_OUTPUT_BYTES {
+        return Err(InterfaceError::MachineOutputTooLarge);
+    }
+    output.push(b'\n');
+    std::io::stdout()
+        .lock()
+        .write_all(&output)
+        .map_err(InterfaceError::Output)
+}
+
+fn print_machine_success(operation: &str, result: serde_json::Value) -> Result<(), InterfaceError> {
+    write_machine_document(&serde_json::json!({
+        "protocol_version": PROTOCOL_VERSION,
+        "operation": operation,
+        "request_id": request_id(),
+        "result": result,
+    }))
+}
+
+pub fn emit_machine_error(operation: &str, error: &InterfaceError) -> i32 {
+    let (code, retryable, exit_code) = match error {
+        InterfaceError::InvalidArgument(_)
+        | InterfaceError::ParseHarnessValue(_)
+        | InterfaceError::ToolValidation(_)
+        | InterfaceError::EmptySql => ("INVALID_ARGUMENT", false, 2),
+        InterfaceError::Infrastructure(
+            crate::infrastructure::HarnessInfraError::StoryNotFound(_)
+            | crate::infrastructure::HarnessInfraError::ToolNotFound(_)
+            | crate::infrastructure::HarnessInfraError::BacklogNotFound(_)
+            | crate::infrastructure::HarnessInfraError::TraceNotFound(_),
+        ) => ("NOT_FOUND", false, 3),
+        InterfaceError::Infrastructure(
+            crate::infrastructure::HarnessInfraError::MissingStoryVerifyCommand(_)
+            | crate::infrastructure::HarnessInfraError::StoryCompletion(_),
+        ) => ("VERIFICATION_FAILED", false, 4),
+        InterfaceError::Infrastructure(
+            crate::infrastructure::HarnessInfraError::StoryDependencySelf(_)
+            | crate::infrastructure::HarnessInfraError::StoryDependencyCycle(_, _)
+            | crate::infrastructure::HarnessInfraError::StoryHierarchySelf(_)
+            | crate::infrastructure::HarnessInfraError::StoryHierarchyCycle(_, _)
+            | crate::infrastructure::HarnessInfraError::StoryStatusConflict { .. }
+            | crate::infrastructure::HarnessInfraError::StoryNotRunnable(_)
+            | crate::infrastructure::HarnessInfraError::ChangesetIdentityConflict { .. }
+            | crate::infrastructure::HarnessInfraError::SnapshotOutputExists(_),
+        ) => ("CONFLICT", false, 3),
+        InterfaceError::Infrastructure(
+            crate::infrastructure::HarnessInfraError::MissingDatabase(_)
+            | crate::infrastructure::HarnessInfraError::InvalidChangeset(_),
+        ) => ("COMPATIBILITY_ERROR", false, 2),
+        InterfaceError::MachineOutputTooLarge => ("OUTPUT_LIMIT_EXCEEDED", false, 5),
+        InterfaceError::NonUtf8Path => ("PATH_NOT_UTF8", false, 2),
+        _ => ("INTERNAL_ERROR", false, 5),
+    };
+    let envelope = serde_json::json!({
+        "protocol_version": PROTOCOL_VERSION,
+        "operation": operation,
+        "request_id": request_id(),
+        "error": {
+            "code": code,
+            "message": error.to_string(),
+            "retryable": retryable,
+            "details": {},
+        },
+    });
+    if let Err(write_error) = write_machine_document(&envelope) {
+        eprintln!("error: {write_error}");
+    }
+    exit_code
+}
+
+pub fn emit_parse_error(message: &str) -> i32 {
+    let envelope = serde_json::json!({
+        "protocol_version": PROTOCOL_VERSION,
+        "operation": "cli.parse",
+        "request_id": request_id(),
+        "error": {
+            "code": "INVALID_ARGUMENT",
+            "message": message,
+            "retryable": false,
+            "details": {},
+        },
+    });
+    if let Err(error) = write_machine_document(&envelope) {
+        eprintln!("error: {error}");
+    }
+    2
 }
 
 pub fn run(cli: Cli) -> Result<(), InterfaceError> {
-    let service = HarnessService::new(resolve_context()?);
+    let context = resolve_context()?;
+    let _epoch_write_guard = acquire_command_guard(&context.repo_root, cli.mutates_state())?;
+    let service = HarnessService::new(context);
 
     match cli.command {
         Command::Init => print_init_result(service.init()?),
@@ -482,8 +954,8 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 input_type: InputType::from_str(&args.input_type)?,
                 summary: args.summary,
                 risk_lane: RiskLane::from_str(&args.lane)?,
-                risk_flags: CsvList::from_optional(args.flags),
-                affected_docs: CsvList::from_optional(args.docs),
+                risk_flags: CsvList::try_from_optional(args.flags)?,
+                affected_docs: CsvList::try_from_optional(args.docs)?,
                 story_id: args.story,
                 notes: args.notes,
             })?;
@@ -499,30 +971,265 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                     verify_command: args.verify,
                     notes: args.notes,
                 })?;
-                println!("Story {} added.", args.id);
+                if args.json {
+                    let story = service
+                        .query_orchestration_stories()?
+                        .into_iter()
+                        .find(|story| story.id == args.id)
+                        .ok_or_else(|| {
+                            InterfaceError::InvalidArgument(
+                                "created story was not readable".to_owned(),
+                            )
+                        })?;
+                    print_machine_success(
+                        "story.add",
+                        serde_json::json!({"changed": true, "story": story}),
+                    )?;
+                } else {
+                    println!("Story {} added.", args.id);
+                }
             }
             StoryAction::Update(args) => {
-                service.update_story(StoryUpdateInput {
-                    id: args.id.clone(),
-                    status: args.status,
-                    evidence: args.evidence,
-                    unit: parse_optional_bool("story update: --unit", args.unit)?,
-                    integration: parse_optional_bool(
-                        "story update: --integration",
-                        args.integration,
-                    )?,
-                    e2e: parse_optional_bool("story update: --e2e", args.e2e)?,
-                    platform: parse_optional_bool("story update: --platform", args.platform)?,
-                    verify_command: args.verify,
-                })?;
-                println!("Story {} updated.", args.id);
+                if args.json {
+                    if args.contract.is_some()
+                        || args.evidence.is_some()
+                        || args.unit.is_some()
+                        || args.integration.is_some()
+                        || args.e2e.is_some()
+                        || args.platform.is_some()
+                        || args.verify.is_some()
+                    {
+                        return Err(InterfaceError::InvalidArgument(
+                            "story update --json is a status CAS operation and cannot combine contract/proof/evidence/verify fields".to_owned(),
+                        ));
+                    }
+                    let status = args.status.ok_or_else(|| {
+                        InterfaceError::InvalidArgument(
+                            "story update --json requires --status".to_owned(),
+                        )
+                    })?;
+                    let expected_status = args.expected_status.ok_or_else(|| {
+                        InterfaceError::InvalidArgument(
+                            "story update --json requires --expected-status".to_owned(),
+                        )
+                    })?;
+                    let result = service.update_story_cas(StoryCasUpdateInput {
+                        id: args.id,
+                        status,
+                        expected_status,
+                        require_runnable: args.require_runnable,
+                    })?;
+                    print_machine_success("story.update", serde_json::to_value(result)?)?;
+                } else {
+                    if args.expected_status.is_some() || args.require_runnable {
+                        return Err(InterfaceError::InvalidArgument(
+                            "--expected-status and --require-runnable require --json".to_owned(),
+                        ));
+                    }
+                    service.update_story(StoryUpdateInput {
+                        id: args.id.clone(),
+                        contract_doc: args.contract,
+                        status: args.status,
+                        evidence: args.evidence,
+                        unit: parse_optional_bool("story update: --unit", args.unit)?,
+                        integration: parse_optional_bool(
+                            "story update: --integration",
+                            args.integration,
+                        )?,
+                        e2e: parse_optional_bool("story update: --e2e", args.e2e)?,
+                        platform: parse_optional_bool("story update: --platform", args.platform)?,
+                        verify_command: args.verify,
+                    })?;
+                    println!("Story {} updated.", args.id);
+                }
             }
+            StoryAction::Dependency(args) => match args.action {
+                StoryDependencyAction::Add(args) => {
+                    let changed = service.add_story_dependency(StoryDependencyInput {
+                        blocker: args.blocker.clone(),
+                        blocked: args.blocked.clone(),
+                    })?;
+                    if args.json {
+                        print_machine_success(
+                            "story.dependency.add",
+                            serde_json::json!({
+                                "blocker": args.blocker, "blocked": args.blocked, "changed": changed
+                            }),
+                        )?;
+                    } else {
+                        println!(
+                            "Story dependency {} -> {} {}.",
+                            args.blocker,
+                            args.blocked,
+                            if changed { "added" } else { "unchanged" }
+                        );
+                    }
+                }
+                StoryDependencyAction::Remove(args) => {
+                    let changed = service.remove_story_dependency(StoryDependencyInput {
+                        blocker: args.blocker.clone(),
+                        blocked: args.blocked.clone(),
+                    })?;
+                    if args.json {
+                        print_machine_success(
+                            "story.dependency.remove",
+                            serde_json::json!({
+                                "blocker": args.blocker, "blocked": args.blocked, "changed": changed
+                            }),
+                        )?;
+                    } else {
+                        println!(
+                            "Story dependency {} -> {} {}.",
+                            args.blocker,
+                            args.blocked,
+                            if changed { "removed" } else { "unchanged" }
+                        );
+                    }
+                }
+            },
+            StoryAction::Hierarchy(args) => match args.action {
+                StoryHierarchyAction::Add(args) => {
+                    let changed = service.add_story_hierarchy(StoryHierarchyInput {
+                        parent: args.parent.clone(),
+                        child: args.child.clone(),
+                    })?;
+                    if args.json {
+                        print_machine_success(
+                            "story.hierarchy.add",
+                            serde_json::json!({
+                                "parent": args.parent, "child": args.child, "changed": changed
+                            }),
+                        )?;
+                    } else {
+                        println!(
+                            "Story hierarchy {} -> {} {}.",
+                            args.parent,
+                            args.child,
+                            if changed { "added" } else { "unchanged" }
+                        );
+                    }
+                }
+                StoryHierarchyAction::Remove(args) => {
+                    let changed = service.remove_story_hierarchy(StoryHierarchyInput {
+                        parent: args.parent.clone(),
+                        child: args.child.clone(),
+                    })?;
+                    if args.json {
+                        print_machine_success(
+                            "story.hierarchy.remove",
+                            serde_json::json!({
+                                "parent": args.parent, "child": args.child, "changed": changed
+                            }),
+                        )?;
+                    } else {
+                        println!(
+                            "Story hierarchy {} -> {} {}.",
+                            args.parent,
+                            args.child,
+                            if changed { "removed" } else { "unchanged" }
+                        );
+                    }
+                }
+            },
+            StoryAction::Backlog(args) => match args.action {
+                StoryBacklogAction::Link(args) => {
+                    let backlog_id = parse_optional_integer(
+                        "story backlog link: --backlog",
+                        Some(args.backlog),
+                    )?
+                    .expect("value provided");
+                    let changed = service.link_story_backlog(StoryBacklogLinkInput {
+                        story_id: args.story.clone(),
+                        backlog_id,
+                        relationship: args.relationship.clone(),
+                    })?;
+                    println!(
+                        "Story backlog link {} -> #{} ({}) {}.",
+                        args.story,
+                        backlog_id,
+                        args.relationship,
+                        if changed { "updated" } else { "unchanged" }
+                    );
+                }
+                StoryBacklogAction::Unlink(args) => {
+                    let backlog_id = parse_optional_integer(
+                        "story backlog unlink: --backlog",
+                        Some(args.backlog),
+                    )?
+                    .expect("value provided");
+                    let changed = service.unlink_story_backlog(&args.story, backlog_id)?;
+                    println!(
+                        "Story backlog link {} -> #{} {}.",
+                        args.story,
+                        backlog_id,
+                        if changed { "removed" } else { "unchanged" }
+                    );
+                }
+                StoryBacklogAction::List(args) => {
+                    let backlog_id =
+                        parse_optional_integer("story backlog list: --backlog", args.backlog)?;
+                    print_story_backlog_links(
+                        &service.query_story_backlog_links(args.story.as_deref(), backlog_id)?,
+                    );
+                }
+            },
             StoryAction::Verify { id } => {
                 let result = service.verify_story(&id)?;
                 println!("Running: {}", result.command);
                 print!("{}", result.stdout);
                 print!("{}", result.stderr);
                 println!("Story {id} verification: {}", result.result);
+                if result.result == "fail" {
+                    std::process::exit(1);
+                }
+            }
+            StoryAction::Complete { id, json } => {
+                let result = service.complete_story(&id)?;
+                if json {
+                    return print_machine_success(
+                        "story.complete",
+                        serde_json::json!({
+                            "id": id, "command": result.command,
+                            "stdout": result.stdout, "stderr": result.stderr,
+                            "result": result.result, "intake_uid": result.intake_uid,
+                            "implementation_trace_uid": result.implementation_trace_uid,
+                            "closed_backlog_ids": result.closed_backlog_ids,
+                            "already_closed_backlog_ids": result.already_closed_backlog_ids,
+                            "referenced_backlog_ids": result.referenced_backlog_ids,
+                        }),
+                    );
+                }
+                println!("Running: {}", result.command);
+                print!("{}", result.stdout);
+                print!("{}", result.stderr);
+                if let Some(intake_uid) = &result.intake_uid {
+                    println!("Completion intake: {intake_uid}");
+                }
+                if let Some(trace_uid) = &result.implementation_trace_uid {
+                    println!("Implementation trace: {trace_uid}");
+                }
+                println!(
+                    "Story {id} completion: {}; closed backlog: {}; already closed: {}; references: {}",
+                    result.result,
+                    result
+                        .closed_backlog_ids
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    result
+                        .already_closed_backlog_ids
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    result
+                        .referenced_backlog_ids
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 if result.result == "fail" {
                     std::process::exit(1);
                 }
@@ -584,6 +1291,34 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 })?;
                 println!("Backlog #{id} closed as {status}.");
             }
+            BacklogAction::Outcome(args) => match args.action {
+                BacklogOutcomeAction::Record(args) => {
+                    let id = parse_optional_integer("backlog outcome record: --id", Some(args.id))?
+                        .expect("value provided");
+                    let observation = service.record_backlog_outcome(BacklogOutcomeInput {
+                        id,
+                        status: args.status,
+                        outcome: args.outcome,
+                        evidence: args.evidence,
+                    })?;
+                    println!(
+                        "Backlog #{} outcome observation {} recorded as {} at {}.",
+                        observation.backlog_id,
+                        observation.ordinal,
+                        observation.status,
+                        observation.observed_at
+                    );
+                }
+            },
+            BacklogAction::Reconcile(args) => {
+                if !args.dry_run && !args.apply {
+                    return Err(InterfaceError::InvalidArgument(
+                        "backlog reconcile requires exactly one of --dry-run or --apply".to_owned(),
+                    ));
+                }
+                debug_assert_eq!(args.action, "backfill-lifecycle-identity");
+                print_legacy_reconcile(&service.reconcile_legacy_improvements(args.apply)?);
+            }
         },
         Command::Tool(args) => match args.action {
             ToolAction::Register(args) => {
@@ -644,11 +1379,11 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 token_estimate: parse_optional_integer("trace: --tokens", args.tokens)?,
                 friction: args.friction,
                 notes: args.notes,
-                actions: CsvList::from_optional(args.actions),
-                files_read: CsvList::from_optional(args.files_read),
-                files_changed: CsvList::from_optional(args.files_changed),
-                decisions: CsvList::from_optional(args.decisions),
-                errors: CsvList::from_optional(args.errors),
+                actions: CsvList::try_from_optional(args.actions)?,
+                files_read: CsvList::try_from_optional(args.files_read)?,
+                files_changed: CsvList::try_from_optional(args.files_changed)?,
+                decisions: CsvList::try_from_optional(args.decisions)?,
+                errors: CsvList::try_from_optional(args.errors)?,
             })?;
             println!("Trace #{id} recorded.");
             let result = service.score_trace(Some(id))?;
@@ -671,20 +1406,150 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 .expect("value provided");
             print_context_score(&service.score_context(id)?);
         }
-        Command::Audit => print_audit(&service.audit()?),
-        Command::Propose(args) => print_proposals(&service.propose(args.commit)?),
+        Command::Audit(args) => {
+            let result = if args.record_evidence {
+                service.audit_record_evidence()?
+            } else {
+                service.audit()?
+            };
+            print_audit(&result)
+        }
+        Command::Propose(args) => {
+            if args.commit {
+                eprintln!("use propose --accept <proposal-key> or propose --reject <proposal-key>");
+                std::process::exit(2);
+            }
+            let decision = match (args.accept, args.reject) {
+                (None, None) => {
+                    if args.outcome_manual
+                        || args.outcome_due.is_some()
+                        || args.outcome_after_traces.is_some()
+                        || args.reason.is_some()
+                    {
+                        return Err(InterfaceError::InvalidArgument(
+                            "propose decision flags require --accept or --reject".to_owned(),
+                        ));
+                    }
+                    if args.show_suppressed {
+                        ProposalDecision::PreviewSuppressed
+                    } else {
+                        ProposalDecision::Preview
+                    }
+                }
+                (Some(key), None) => {
+                    let schedules = usize::from(args.outcome_manual)
+                        + usize::from(args.outcome_due.is_some())
+                        + usize::from(args.outcome_after_traces.is_some());
+                    if schedules != 1 || args.reason.is_some() {
+                        return Err(InterfaceError::InvalidArgument(
+                            "propose --accept requires exactly one outcome schedule".to_owned(),
+                        ));
+                    }
+                    let schedule = if args.outcome_manual {
+                        "manual".to_owned()
+                    } else if let Some(value) = args.outcome_due {
+                        format!("due:{value}")
+                    } else {
+                        format!("traces:{}", args.outcome_after_traces.unwrap_or_default())
+                    };
+                    ProposalDecision::Accept { key, schedule }
+                }
+                (None, Some(key)) => {
+                    if args.outcome_manual
+                        || args.outcome_due.is_some()
+                        || args.outcome_after_traces.is_some()
+                    {
+                        return Err(InterfaceError::InvalidArgument(
+                            "propose --reject does not accept an outcome schedule".to_owned(),
+                        ));
+                    }
+                    ProposalDecision::Reject {
+                        key,
+                        reason: args.reason.ok_or_else(|| {
+                            InterfaceError::InvalidArgument(
+                                "propose --reject requires --reason".to_owned(),
+                            )
+                        })?,
+                    }
+                }
+                _ => unreachable!(),
+            };
+            print_proposal_result(&service.propose(decision)?)
+        }
         Command::Db(args) => match args.action {
             DbAction::Changeset(args) => match args.action {
-                ChangesetAction::Apply { path } => {
-                    print_changeset_apply_result(service.apply_changeset(&path)?)
+                ChangesetAction::Apply { path, json } => {
+                    let result = service.apply_changeset(&path)?;
+                    if json {
+                        print_machine_success("db.changeset.apply", serde_json::to_value(result)?)?
+                    } else {
+                        print_changeset_apply_result(result)
+                    }
                 }
+                ChangesetAction::Status { path, .. } => print_machine_success(
+                    "db.changeset.status",
+                    serde_json::to_value(service.changeset_status(&path)?)?,
+                )?,
             },
+            DbAction::Snapshot(args) => {
+                if args.output.to_str().is_none() {
+                    return Err(InterfaceError::NonUtf8Path);
+                }
+                print_machine_success(
+                    "db.snapshot",
+                    serde_json::to_value(service.snapshot_db(&args.output)?)?,
+                )?
+            }
             DbAction::Rebuild { from } => print_db_rebuild_result(service.rebuild_db(&from)?),
         },
         Command::Query(args) => match args.view {
+            QueryView::Contract(_) => print_machine_success(
+                "query.contract",
+                serde_json::to_value(service.discover_contract()?)?,
+            )?,
+            QueryView::Stories(_) => print_machine_success(
+                "query.stories",
+                serde_json::json!({"stories": service.query_orchestration_stories()?}),
+            )?,
+            QueryView::WorkGraph(_) => print_machine_success(
+                "query.work-graph",
+                serde_json::to_value(service.query_work_graph()?)?,
+            )?,
             QueryView::Matrix(args) => print_matrix(&service.query_matrix()?, args.numeric),
+            QueryView::Dependencies(args) => {
+                let dependencies = service.query_story_dependencies(args.story.as_deref())?;
+                if args.json {
+                    print_machine_success(
+                        "query.dependencies",
+                        serde_json::json!({"dependencies": dependencies}),
+                    )?;
+                } else {
+                    print_dependencies(&dependencies)
+                }
+            }
+            QueryView::Hierarchy(args) => {
+                let hierarchy = service.query_story_hierarchy(args.story.as_deref())?;
+                if args.json {
+                    print_machine_success(
+                        "query.hierarchy",
+                        serde_json::json!({"hierarchy": hierarchy}),
+                    )?;
+                } else {
+                    for edge in hierarchy {
+                        println!("{} -> {}", edge.parent, edge.child);
+                    }
+                }
+            }
             QueryView::Backlog(args) => {
-                print_backlog(&service.query_backlog(backlog_filter(&args))?)
+                let filter = backlog_filter(&args);
+                let id = parse_optional_integer("query backlog: --id", args.id)?;
+                if let Some(id) = id {
+                    print_query_table(&service.query_sql(&format!(
+                        "SELECT backlog.id, backlog.uid, backlog.status, backlog.proposal_key, backlog.predecessor_uid, backlog.resolution_evidence, (SELECT story_id FROM story_backlog_link WHERE backlog_uid=backlog.uid AND relationship='resolves') AS resolver, COALESCE((SELECT group_concat(story_id, ', ') FROM story_backlog_link WHERE backlog_uid=backlog.uid AND relationship='references'), '') AS reference_stories FROM backlog WHERE backlog.id={id};"
+                    ))?);
+                } else {
+                    print_backlog(&service.query_backlog(filter)?);
+                }
             }
             QueryView::Decisions => print_decisions(&service.query_decisions()?),
             QueryView::Intakes => print_intakes(&service.query_intakes()?),
@@ -720,6 +1585,9 @@ pub fn run(cli: Cli) -> Result<(), InterfaceError> {
                 })?);
             }
             QueryView::Stats => print_stats(&service.query_stats()?),
+            QueryView::ImprovementHealth => {
+                print_improvement_health(&service.query_improvement_health()?)
+            }
             QueryView::Sql { query } => {
                 if query.is_empty() {
                     return Err(InterfaceError::EmptySql);
@@ -880,6 +1748,11 @@ fn print_proposals(proposals: &[ImprovementProposal]) {
             index + 1,
             proposal.confidence
         );
+        println!("  Key: {}", proposal.key);
+        println!("  Lifecycle: {}", proposal.lifecycle_state);
+        if let Some(explanation) = &proposal.lifecycle_explanation {
+            println!("  Lifecycle detail: {explanation}");
+        }
         println!("  Title: {}", proposal.title);
         println!("  Component: {}", proposal.component);
         println!("  Evidence: {}", proposal.evidence);
@@ -888,14 +1761,21 @@ fn print_proposals(proposals: &[ImprovementProposal]) {
         println!("  Suggested action: {}", proposal.suggested_action);
         println!("  Validation: {}", proposal.validation_plan);
         if let Some(id) = proposal.committed_backlog_id {
-            println!("  Created backlog item #{id}");
+            println!("  Backlog item: #{id}");
         }
     }
     println!();
     println!(
-        "{} proposals generated. Use --commit to create backlog items.",
+        "{} proposals generated. Use --accept <proposal-key> or --reject <proposal-key> to make one explicit decision.",
         proposals.len()
     );
+}
+
+fn print_proposal_result(result: &ProposalResult) {
+    print_proposals(&result.proposals);
+    if let Some(message) = &result.message {
+        println!("{message}");
+    }
 }
 
 fn print_changeset_apply_result(result: ChangesetApplyResult) {
@@ -1063,6 +1943,29 @@ fn print_matrix(records: &[StoryMatrixRecord], numeric: bool) {
     );
 }
 
+fn print_dependencies(records: &[crate::application::StoryDependencyRecord]) {
+    let rows = records
+        .iter()
+        .map(|record| vec![record.blocker.clone(), record.blocked.clone()])
+        .collect::<Vec<_>>();
+    print_table(&["blocker", "blocked"], &rows);
+}
+
+fn print_story_backlog_links(records: &[crate::application::StoryBacklogLinkRecord]) {
+    let rows = records
+        .iter()
+        .map(|record| {
+            vec![
+                record.story_id.clone(),
+                record.backlog_id.to_string(),
+                record.backlog_uid.clone(),
+                record.relationship.clone(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    print_table(&["story", "backlog", "backlog_uid", "relationship"], &rows);
+}
+
 fn print_backlog(records: &[BacklogRecord]) {
     let rows = records
         .iter()
@@ -1087,6 +1990,41 @@ fn print_backlog(records: &[BacklogRecord]) {
             "actual_outcome",
         ],
         &rows,
+    );
+}
+
+fn print_legacy_reconcile(result: &LegacyReconcileResult) {
+    let rows = result
+        .records
+        .iter()
+        .map(|record| {
+            vec![
+                record.backlog_id.to_string(),
+                record.classification.clone(),
+                record.proposal_key.clone().unwrap_or_default(),
+                record.changes.clone(),
+                record.reason.clone(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    print_table(
+        &[
+            "backlog",
+            "classification",
+            "proposal_key",
+            "changes",
+            "reason",
+        ],
+        &rows,
+    );
+    println!(
+        "Legacy reconciliation: mode={}, changed={}, trace={}",
+        if result.applied { "apply" } else { "dry-run" },
+        result.changed,
+        result
+            .trace_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| "none".to_owned())
     );
 }
 
@@ -1364,6 +2302,41 @@ fn print_stats(stats: &HarnessStats) {
     );
 }
 
+fn print_improvement_health(result: &ImprovementHealthResult) {
+    println!("=== Daily Improvement Health ===");
+    println!("Audit entropy: {}/100", result.entropy_score);
+    println!("Actionable drift: {}", result.actionable_drift);
+    let rows = result
+        .items
+        .iter()
+        .map(|item| {
+            vec![
+                item.category.clone(),
+                item.id.clone(),
+                item.title.clone(),
+                item.state.clone(),
+                item.schedule.clone(),
+                item.outcome.clone(),
+                item.evidence.clone(),
+                item.next_action.clone(),
+            ]
+        })
+        .collect::<Vec<_>>();
+    print_table(
+        &[
+            "category",
+            "id",
+            "title",
+            "state",
+            "schedule",
+            "outcome",
+            "evidence",
+            "next_action",
+        ],
+        &rows,
+    );
+}
+
 fn print_query_table(table: &QueryTable) {
     let headers = table.headers.iter().map(String::as_str).collect::<Vec<_>>();
     print_table(&headers, &table.rows);
@@ -1416,12 +2389,133 @@ fn print_row(values: &[String], widths: &[usize]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::CommandFactory;
+    use clap::{CommandFactory, Parser};
     use std::path::Path;
 
     #[test]
     fn cli_definition_is_valid() {
         Cli::command().debug_assert();
+    }
+
+    #[test]
+    fn story_dependency_command_parses_typed_edges() {
+        let cli = Cli::try_parse_from([
+            "harness-cli",
+            "story",
+            "dependency",
+            "add",
+            "--blocker",
+            "US-073",
+            "--blocked",
+            "US-074",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Story(StoryArgs {
+                action: StoryAction::Dependency(StoryDependencyArgs {
+                    action: StoryDependencyAction::Add(StoryDependencyMutationArgs { blocker, blocked, .. })
+                })
+            }) if blocker == "US-073" && blocked == "US-074"
+        ));
+
+        let cli = Cli::try_parse_from([
+            "harness-cli",
+            "story",
+            "dependency",
+            "remove",
+            "--blocker",
+            "US-073",
+            "--blocked",
+            "US-074",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Story(StoryArgs {
+                action: StoryAction::Dependency(StoryDependencyArgs {
+                    action: StoryDependencyAction::Remove(StoryDependencyMutationArgs { blocker, blocked, .. })
+                })
+            }) if blocker == "US-073" && blocked == "US-074"
+        ));
+
+        let cli =
+            Cli::try_parse_from(["harness-cli", "query", "dependencies", "--story", "US-074"])
+                .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Query(QueryArgs {
+                view: QueryView::Dependencies(DependenciesQueryArgs { story: Some(story), .. })
+            }) if story == "US-074"
+        ));
+    }
+
+    #[test]
+    fn improvement_health_commands_parse_typed_outcomes() {
+        let cli = Cli::try_parse_from([
+            "harness-cli",
+            "backlog",
+            "outcome",
+            "record",
+            "--id",
+            "42",
+            "--status",
+            "confirmed",
+            "--outcome",
+            "Friction decreased",
+            "--evidence",
+            "five traces",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Backlog(BacklogArgs {
+                action: BacklogAction::Outcome(BacklogOutcomeArgs {
+                    action: BacklogOutcomeAction::Record(BacklogOutcomeRecordArgs { status, .. })
+                })
+            }) if status == "confirmed"
+        ));
+
+        let cli = Cli::try_parse_from(["harness-cli", "query", "improvement-health"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Query(QueryArgs {
+                view: QueryView::ImprovementHealth
+            })
+        ));
+    }
+
+    #[test]
+    fn legacy_reconciliation_command_requires_an_explicit_mode() {
+        let cli = Cli::try_parse_from([
+            "harness-cli",
+            "backlog",
+            "reconcile",
+            "--action",
+            "backfill-lifecycle-identity",
+            "--dry-run",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Backlog(BacklogArgs {
+                action: BacklogAction::Reconcile(BacklogReconcileArgs {
+                    dry_run: true,
+                    apply: false,
+                    ..
+                })
+            })
+        ));
+        assert!(Cli::try_parse_from([
+            "harness-cli",
+            "backlog",
+            "reconcile",
+            "--action",
+            "backfill-lifecycle-identity",
+            "--dry-run",
+            "--apply",
+        ])
+        .is_err());
     }
 
     #[test]

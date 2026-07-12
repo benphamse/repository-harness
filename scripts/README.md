@@ -14,8 +14,11 @@ scripts/bin/harness-cli intake ...    # Record a feature intake classification
 scripts/bin/harness-cli story ...     # Add or update a story (test matrix row)
 scripts/bin/harness-cli story update --id US-001 --unit 1 --integration 1 --e2e 0 --platform 0
 scripts/bin/harness-cli story verify US-001  # Run the story's verify_command
+scripts/bin/harness-cli story complete US-001 # Fresh proof plus atomic lifecycle completion
 scripts/bin/harness-cli decision ...  # Add a decision or run its verification
 scripts/bin/harness-cli backlog ...   # Add or close a backlog item
+scripts/bin/harness-cli propose       # Classify new, active, handled, and recurring evidence
+scripts/bin/harness-cli propose --show-suppressed # Explain handled evidence
 scripts/bin/harness-cli trace ...     # Record and auto-score an agent execution trace
 scripts/bin/harness-cli score-trace   # Score a trace against TRACE_SPEC.md tiers
 scripts/bin/harness-cli query ...     # Query harness data, including backlog --open/--closed
@@ -73,6 +76,7 @@ scripts/bin/harness-cli intake ...
 scripts/bin/harness-cli story add ...
 scripts/bin/harness-cli story update ...
 scripts/bin/harness-cli story verify ...
+scripts/bin/harness-cli story complete ...
 scripts/bin/harness-cli decision add ...
 scripts/bin/harness-cli decision verify ...
 scripts/bin/harness-cli backlog add ...
@@ -164,6 +168,30 @@ that tag, or set `HARNESS_CLI_BASE_URL` to point at an alternate artifact
 directory, such as a local `file:///.../dist` directory created by
 `scripts/build-harness-cli-release.sh`.
 
+`--merge` (PowerShell: `-Merge`) deliberately does not replace an existing CLI.
+To upgrade a CLI explicitly, pin one immutable tag for both the template files
+and release artifact:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/harness-cli-v0.1.14/scripts/install-harness.sh" |
+  bash -s -- --merge --upgrade-cli --ref harness-cli-v0.1.14 --yes
+```
+
+```powershell
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/hoangnb24/repository-harness/harness-cli-v0.1.14/scripts/install-harness.ps1"))) `
+  -Merge -UpgradeCli -Ref harness-cli-v0.1.14 -Yes
+```
+
+The installer rejects branch names and `latest`, downloads the tagged template
+and matching platform artifact, verifies the published SHA-256, backs up the
+old executable, then atomically replaces it. A download/checksum failure leaves
+the old CLI in place. Run `scripts/test-install-harness-cli-upgrade.sh` for the
+merge/upgrade/checksum-preservation regression.
+
+The external process protocol, including JSON envelopes, capability discovery,
+timeouts, and snapshot semantics, is documented in
+`docs/contracts/harness-orchestration-v1.md`.
+
 ## Schema Migrations
 
 Migration files live under `scripts/schema/` and are named `NNN-description.sql`
@@ -190,6 +218,19 @@ test:platform
 test:release
   full suite, log checks, and performance smoke
 ```
+
+## Changeset Rebuild Validation
+
+Run the durable repository rebuild and its validator contract regressions:
+
+```bash
+scripts/validate-changeset-rebuild.sh
+scripts/test-validate-changeset-rebuild.sh
+```
+
+The validator builds the current workspace CLI unless `HARNESS_CLI` is set
+explicitly. `HARNESS_CHANGESET_DIR` can point validation at a copied fixture
+history without changing the repository changesets.
 
 ## Release Packaging
 
