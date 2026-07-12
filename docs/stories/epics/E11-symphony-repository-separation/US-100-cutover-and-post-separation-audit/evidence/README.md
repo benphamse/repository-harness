@@ -37,6 +37,12 @@ The successful fresh-clone result is recorded in
 from a new clone with the command above rather than treating a long-lived
 local checkout as evidence.
 
+`runtime-disposition.json` records the owner-approved cleanup of the 15 legacy
+worktrees only after `audit-us100-runtime-disposition.sh --plan` proved that
+every live patch matched its restore-rehearsed US-089 backup. Its post-cleanup
+gate requires zero registered legacy worktrees, zero `.impeccable` files, and
+zero active `.harness/changesets` files while preserving all 15 Git branches.
+
 `scripts/verify-e11-us100.sh --final` repeats every readiness check and also
 requires `observation-window.json`. That record must prove all of the following:
 

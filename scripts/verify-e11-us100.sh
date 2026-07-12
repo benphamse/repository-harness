@@ -25,8 +25,10 @@ ROLLBACK="$EVIDENCE_DIR/rollback-rehearsal.json"
 ROLLBACK_SUM="$ROLLBACK.sha256"
 CANONICAL_TARGET="$EVIDENCE_DIR/canonical-target-ownership.json"
 CANONICAL_TARGET_SUM="$CANONICAL_TARGET.sha256"
+RUNTIME_DISPOSITION="$EVIDENCE_DIR/runtime-disposition.json"
+RUNTIME_DISPOSITION_SUM="$RUNTIME_DISPOSITION.sha256"
 
-for file in "$RELEASE" "$PREMERGE" "$ROLLBACK" "$ROLLBACK_SUM" "$CANONICAL_TARGET" "$CANONICAL_TARGET_SUM"; do need "$file"; done
+for file in "$RELEASE" "$PREMERGE" "$ROLLBACK" "$ROLLBACK_SUM" "$CANONICAL_TARGET" "$CANONICAL_TARGET_SUM" "$RUNTIME_DISPOSITION" "$RUNTIME_DISPOSITION_SUM"; do need "$file"; done
 
 # The sidecar proves that the reviewed rollback record is the record being used.
 (cd "$EVIDENCE_DIR" && shasum -a 256 -c "$(basename "$ROLLBACK_SUM")") >/dev/null \
@@ -58,6 +60,29 @@ jq -e '
   .verifier == "tests/cutover/assert-canonical-symphony-ownership.sh" and
   (.recorded_at | fromdateiso8601) > 0
 ' "$CANONICAL_TARGET" >/dev/null || fail "canonical target ownership record is incomplete"
+
+(cd "$EVIDENCE_DIR" && shasum -a 256 -c "$(basename "$RUNTIME_DISPOSITION_SUM")") >/dev/null \
+  || fail "runtime disposition checksum does not match"
+jq -e '
+  .schema == "e11-us100-runtime-disposition-v1" and
+  .status == "complete" and .reviewed == true and
+  .archive.worktrees_verified_before_removal == 15 and
+  .archive.all_patch_identities_matched == true and
+  .archive.all_restore_rehearsals_passed == true and
+  .archive.untracked_files_before_removal == 0 and
+  .removal.registered_worktrees_removed == 15 and
+  .removal.symphony_branches_removed == 0 and
+  .removal.symphony_branches_preserved == 15 and
+  .removal.impeccable_files_removed == 2 and
+  .removal.changeset_files_removed == 0 and
+  .post_cleanup.registered_legacy_worktrees == 0 and
+  .post_cleanup.impeccable_files == 0 and
+  .post_cleanup.changeset_files == 0 and
+  .post_cleanup.audit_status == "pass" and
+  (.recorded_at | fromdateiso8601) > 0
+' "$RUNTIME_DISPOSITION" >/dev/null || fail "runtime disposition record is incomplete"
+"$ROOT_DIR/tests/cutover/audit-us100-runtime-disposition.sh" --expect-clean >/dev/null \
+  || fail "runtime disposition does not match the active checkout"
 
 # Pin the exact public Symphony release already independently downloaded and
 # checksum-verified. A release URL or tag alone is not sufficient evidence.
@@ -158,7 +183,7 @@ if find "$ROOT_DIR/.harness/changesets" -type f -print -quit 2>/dev/null | grep 
 fi
 
 if [[ "$MODE" == "--develop-candidate" ]]; then
-  echo "US-100 develop candidate passed; main/release/runtime/observation gates remain pending"
+  echo "US-100 develop candidate passed; runtime cleanup is complete; main/release/observation gates remain pending"
   exit 0
 fi
 

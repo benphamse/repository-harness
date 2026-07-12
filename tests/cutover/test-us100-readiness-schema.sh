@@ -15,6 +15,8 @@ make_evidence() {
   cp "$SOURCE_EVIDENCE/rollback-rehearsal.json.sha256" "$destination/"
   cp "$SOURCE_EVIDENCE/canonical-target-ownership.json" "$destination/"
   cp "$SOURCE_EVIDENCE/canonical-target-ownership.json.sha256" "$destination/"
+  cp "$SOURCE_EVIDENCE/runtime-disposition.json" "$destination/"
+  cp "$SOURCE_EVIDENCE/runtime-disposition.json.sha256" "$destination/"
 }
 
 platforms='["linux-arm64","linux-x64","mac-arm64","mac-x64","windows-x64"]'
