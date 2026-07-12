@@ -69,6 +69,24 @@ The repository-wide rebuild validator currently reports the already-completed
 US-089 as unverified after semantic replay (entropy 5). This pre-existing replay
 baseline is recorded rather than treated as US-092 protocol evidence.
 
-Release evidence remains pending the mandatory owner go/no-go: immutable tag,
-published macOS/Linux/Windows artifacts and checksums, native artifact matrix,
-PowerShell smoke, and replacement of `PENDING-US-092-RELEASE` in the contract.
+Release evidence completed on 2026-07-12:
+
+- Protocol tag `harness-cli-v0.1.14` peels to exact develop commit
+  `d2f89eeabe8d01df95fd19cd6ba981b01a71730f`; `main` was not promoted.
+- Release run `29177994849` passed Verify, macOS ARM64/x64, Linux ARM64/x64,
+  Windows x64 PowerShell protocol/snapshot smoke, and publication.
+- The public release contains all five binaries and five checksum files. The
+  downloaded files verify to:
+  - macOS ARM64: `0adcd5360cd636c189fe0cd958e5b73261f7012a4e43631f08c61269c785caf9`
+  - macOS x64: `d0ee0b6b9f702eb87824e96b42d7a8382012b542a076e8ce2d0b1bb8d6201168`
+  - Linux ARM64: `8828d624075fbae2f44b6f57ac651bdacb2e7c60ed0cc15853b9481b3edf0161`
+  - Linux x64: `d2551d32490d0af78f8eb387d8854771ebfcde2260b068539384592668cc54a6`
+  - Windows x64: `abd5a4176d52b3576c66932f44f377d2667fba409011de145044f425fd0a82ca`
+- Windows produced a different byte hash between rehearsal and publication;
+  both exact binaries passed the native smoke, the published checksum verifies,
+  and the owner explicitly accepted the published checksum.
+- Immutable tags `harness-cli-v0.1.12` and `harness-cli-v0.1.13` have no GitHub
+  releases: their fail-closed jobs respectively exposed the app-server stdout
+  race and Windows snapshot-handle bug fixed in v0.1.14.
+- The contract records `HARNESS_PROTOCOL_V1_TAG=harness-cli-v0.1.14` for
+  downstream US-093 and US-095 compatibility gates.
