@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VALIDATOR="$ROOT_DIR/scripts/validate-changeset-rebuild.sh"
 CLI="$ROOT_DIR/target/debug/harness-cli"
+FIXTURE_ROOT="$ROOT_DIR/tests/fixtures/changesets/generic-rebuild"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -13,8 +14,10 @@ unset HARNESS_VALIDATOR_LIBRARY_ONLY
 
 default_output="$(env -u HARNESS_CLI "$VALIDATOR")"
 grep -Fq "rebuild validator executable: $CLI" <<<"$default_output"
+grep -Fq "rebuild validator fixtures: $FIXTURE_ROOT/positive" <<<"$default_output"
+grep -Fq "generic changeset rebuild passed" <<<"$default_output"
 
-override_output="$(HARNESS_CLI="$CLI" "$VALIDATOR")"
+override_output="$(HARNESS_CLI="$CLI" "$VALIDATOR" --fixtures "$FIXTURE_ROOT/positive" --expected "$FIXTURE_ROOT/expected.json")"
 grep -Fq "rebuild validator executable: $CLI" <<<"$override_output"
 
 if HARNESS_CLI="$TMP_DIR/missing-cli" "$VALIDATOR" >"$TMP_DIR/missing.out" 2>&1; then
@@ -32,60 +35,51 @@ touch -t 209912312359 "$selection_root/scripts/bin/harness-cli"
 selected="$(HARNESS_CLI= HARNESS_VALIDATOR_SKIP_BUILD=1 select_harness_cli "$selection_root")"
 [[ "$selected" == "$selection_root/target/debug/harness-cli" ]]
 
-copy_changesets() {
-  local destination="$1"
-  mkdir -p "$destination"
-  cp "$ROOT_DIR"/.harness/changesets/*.jsonl "$destination/"
+assert_failed_apply_rolled_back() {
+  local fixture="$1"
+  local run_id="$2"
+  local story_id="$3"
+  local expected_error="$4"
+  local name="$5"
+  local db="$TMP_DIR/$name.db"
+  HARNESS_DB_PATH="$db" "$CLI" init >/dev/null
+  if HARNESS_DB_PATH="$db" "$CLI" db changeset apply "$fixture" >"$TMP_DIR/$name.out" 2>&1; then
+    echo "negative fixture unexpectedly applied: $name" >&2
+    exit 1
+  fi
+  grep -Fq "$expected_error" "$TMP_DIR/$name.out"
+  [[ "$(sqlite3 "$db" "SELECT COUNT(*) FROM story WHERE id='$story_id';")" == "0" ]]
+  [[ "$(sqlite3 "$db" "SELECT COUNT(*) FROM changeset_applied WHERE id='$run_id';")" == "0" ]]
 }
 
-later_dir="$TMP_DIR/later"
-copy_changesets "$later_dir"
-printf '%s\n' \
-  '{"op":"changeset.header","version":1,"run_id":"run_9999999997_later_verify","base_schema_version":12}' \
-  '{"op":"story.verify","version":2,"id":"US-073","payload":{"result":"pass","verified_at":"2099-01-02 03:04:05"}}' \
-  >"$later_dir/run_9999999997_later_verify.changeset.jsonl"
-HARNESS_CLI="$CLI" HARNESS_CHANGESET_DIR="$later_dir" "$VALIDATOR" >/dev/null
-HARNESS_DB_PATH="$TMP_DIR/later.db" "$CLI" db rebuild --from "$later_dir" >/dev/null
-later_value="$(sqlite3 "$TMP_DIR/later.db" "SELECT last_verified_result || '|' || last_verified_at FROM story WHERE id='US-073';")"
-[[ "$later_value" == "pass|2099-01-02 03:04:05" ]]
+assert_failed_apply_rolled_back \
+  "$FIXTURE_ROOT/negative/unsupported-op.changeset.jsonl" \
+  fixture_negative_unsupported FIX-ROLLBACK \
+  "unsupported operation 'fixture.unsupported'" unsupported
 
-garbage_dir="$TMP_DIR/garbage"
-copy_changesets "$garbage_dir"
-printf '%s\n' \
-  '{"op":"changeset.header","version":1,"run_id":"run_9999999998_garbage_verify","base_schema_version":12}' \
-  '{"op":"story.verify","version":2,"id":"US-073","payload":{"result":"pass","verified_at":"garbage"}}' \
-  >"$garbage_dir/run_9999999998_garbage_verify.changeset.jsonl"
-if HARNESS_DB_PATH="$TMP_DIR/garbage.db" "$CLI" db rebuild --from "$garbage_dir" >"$TMP_DIR/garbage.out" 2>&1; then
-  echo "operation replay unexpectedly accepted a garbage proof timestamp" >&2
+assert_failed_apply_rolled_back \
+  "$FIXTURE_ROOT/negative/invalid-timestamp.changeset.jsonl" \
+  fixture_negative_timestamp FIX-BAD-TIMESTAMP \
+  "verified_at must use YYYY-MM-DD HH:MM:SS" invalid-timestamp
+
+assert_failed_apply_rolled_back \
+  "$FIXTURE_ROOT/negative/missing-timestamp.changeset.jsonl" \
+  fixture_negative_missing_timestamp FIX-MISSING-TIMESTAMP \
+  "story.verify version 2 requires verified_at" missing-timestamp
+
+identity_db="$TMP_DIR/identity.db"
+identity_fixture="$TMP_DIR/identity.changeset.jsonl"
+cp "$FIXTURE_ROOT/positive/001-story-graph.changeset.jsonl" "$identity_fixture"
+HARNESS_DB_PATH="$identity_db" "$CLI" init >/dev/null
+HARNESS_DB_PATH="$identity_db" "$CLI" db changeset apply "$identity_fixture" >/dev/null
+sed 's/Generic root/Changed bytes/' "$identity_fixture" >"$identity_fixture.changed"
+mv "$identity_fixture.changed" "$identity_fixture"
+if HARNESS_DB_PATH="$identity_db" "$CLI" db changeset status "$identity_fixture" --json >"$TMP_DIR/identity.out" 2>&1; then
+  echo "changeset status unexpectedly accepted changed content for an applied run ID" >&2
   exit 1
 fi
-grep -Fq "verified_at must use YYYY-MM-DD HH:MM:SS" "$TMP_DIR/garbage.out"
+grep -Fq "changeset identity conflict" "$TMP_DIR/identity.out"
+[[ "$(sqlite3 "$identity_db" "SELECT title FROM story WHERE id='FIX-ROOT';")" == "Generic root" ]]
+[[ "$(sqlite3 "$identity_db" "SELECT COUNT(*) FROM changeset_applied WHERE id='fixture_generic_story_graph';")" == "1" ]]
 
-missing_dir="$TMP_DIR/missing-timestamp"
-copy_changesets "$missing_dir"
-printf '%s\n' \
-  '{"op":"changeset.header","version":1,"run_id":"run_9999999999_missing_verify","base_schema_version":12}' \
-  '{"op":"story.verify","version":2,"id":"US-073","payload":{"result":"pass"}}' \
-  >"$missing_dir/run_9999999999_missing_verify.changeset.jsonl"
-if HARNESS_DB_PATH="$TMP_DIR/missing.db" "$CLI" db rebuild --from "$missing_dir" >"$TMP_DIR/missing-timestamp.out" 2>&1; then
-  echo "operation replay unexpectedly accepted missing proof time" >&2
-  exit 1
-fi
-grep -Fq "story.verify version 2 requires verified_at" "$TMP_DIR/missing-timestamp.out"
-
-proof_db="$TMP_DIR/proof-query.db"
-HARNESS_DB_PATH="$proof_db" "$CLI" db rebuild --from "$ROOT_DIR/.harness/changesets" >/dev/null
-sqlite3 "$proof_db" "UPDATE story SET last_verified_result='pass', last_verified_at='garbage' WHERE id='US-073';"
-if proof_is_valid "$proof_db" US-073; then
-  echo "proof SQL unexpectedly accepted garbage timestamp" >&2
-  exit 1
-fi
-sqlite3 "$proof_db" "UPDATE story SET last_verified_at=NULL WHERE id='US-073';"
-if proof_is_valid "$proof_db" US-073; then
-  echo "proof SQL unexpectedly accepted missing timestamp" >&2
-  exit 1
-fi
-sqlite3 "$proof_db" "UPDATE story SET last_verified_at='2099-01-02 03:04:05' WHERE id='US-073';"
-proof_is_valid "$proof_db" US-073
-
-echo "rebuild validator contract tests passed"
+echo "generic rebuild validator contract tests passed"
