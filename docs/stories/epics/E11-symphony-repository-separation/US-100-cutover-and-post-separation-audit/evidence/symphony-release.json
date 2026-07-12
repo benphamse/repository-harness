@@ -1,0 +1,23 @@
+{
+  "schema": "e11-us100-symphony-release-v1",
+  "repository": "hoangnb24/symphony",
+  "tag": "symphony-v0.1.0",
+  "source_commit": "2357bc4f333a12794f975a46dbc0df96599fe4c0",
+  "draft": false,
+  "prerelease": false,
+  "published_at": "2026-07-12T10:07:56Z",
+  "release_url": "https://github.com/hoangnb24/symphony/releases/tag/symphony-v0.1.0",
+  "candidate_run": 29187643162,
+  "download_verification": {
+    "all_sidecars_passed": true,
+    "verified_at": "2026-07-12T10:08:30Z",
+    "public_assets": 16
+  },
+  "archives": [
+    {"platform":"linux-arm64","sha256":"3615d178909931950d7624c8e5622b25d42fb8938013549ad8d52bcb28bfd45c"},
+    {"platform":"linux-x64","sha256":"0efdf1e772010f850aee64f8bc758c6fe94131e103a7a1caea968db7522e7e55"},
+    {"platform":"mac-arm64","sha256":"eb9d56bde05581c1fba56984937159218d4829b339385eb4ebafce835c049d90"},
+    {"platform":"mac-x64","sha256":"0a3906dbfd8bd803715a0ad69c10aaed8c266047a2184543edb332e0dbc44574"},
+    {"platform":"windows-x64","sha256":"1f5c6711e3c045fa70adfe8a9b44bf33ddc00b640b32bfdaef17ec667abf2390"}
+  ]
+}

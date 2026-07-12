@@ -25,6 +25,7 @@ run query stories --json >"$tmp/stories.json"
 run query matrix >"$tmp/matrix.txt"
 run query backlog --open >"$tmp/backlog.txt"
 run query tools --json >"$tmp/tools.json"
+run query improvement-health >"$tmp/improvement-health.txt"
 run audit >"$tmp/audit.txt"
 run propose >"$tmp/propose.txt"
 
@@ -68,9 +69,14 @@ for backlog_id in 10 11 12 14; do
     echo "source Symphony backlog occurrence remains active: $backlog_id" >&2; exit 1;
   }
 done
-test "$(sqlite3 "$tmp/core.db" "SELECT count(*) FROM backlog WHERE lower(title) LIKE '%symphony%';")" = 0 || {
-  echo "active backlog contains Symphony product wording" >&2; exit 1;
-}
+test "$(sqlite3 "$tmp/core.db" "
+  SELECT count(*) FROM backlog
+  WHERE status='proposed' AND lower(
+    coalesce(title,'') || ' ' || coalesce(discovered_while,'') || ' ' ||
+    coalesce(current_pain,'') || ' ' || coalesce(suggested_improvement,'') || ' ' ||
+    coalesce(predicted_impact,'') || ' ' || coalesce(notes,'')
+  ) LIKE '%symphony%';
+")" = 0 || { echo "active backlog contains Symphony product wording" >&2; exit 1; }
 test "$(sqlite3 "$tmp/core.db" "SELECT count(*) FROM tool WHERE name IN ('impeccable','web-ui-build','web-ui-e2e','web-ui-desktop-smoke') OR lower(command||' '||description||' '||coalesce(scan_target,'')) LIKE '%symphony%';")" = 0 || {
   echo "core tool registry contains a Symphony/UI provider" >&2; exit 1;
 }
@@ -87,8 +93,8 @@ unexpected_audit_rows="$(grep -E '^  - ' "$tmp/audit.txt" | grep -v 'US-099: Har
 test -z "$unexpected_audit_rows" || {
   echo "core audit contains a non-US-099 finding" >&2; printf '%s\n' "$unexpected_audit_rows" >&2; exit 1;
 }
-for output in "$tmp/backlog.txt" "$tmp/audit.txt" "$tmp/propose.txt"; do
-  if grep -Eiq 'harness-symphony|web-ui-(build|e2e|desktop)|electron|playwright|impeccable' "$output"; then
+for output in "$tmp/backlog.txt" "$tmp/improvement-health.txt" "$tmp/audit.txt" "$tmp/propose.txt"; do
+  if grep -Eiq 'symphony|web-ui-(build|e2e|desktop)|electron|playwright|impeccable' "$output"; then
     echo "core query leaked an active product/provider reference: $output" >&2
     exit 1
   fi
@@ -100,6 +106,7 @@ if [[ -n "$EVIDENCE_DIR" ]]; then
   cp "$tmp/backlog.txt" "$EVIDENCE_DIR/backlog-open.txt"
   cp "$tmp/audit.txt" "$EVIDENCE_DIR/audit.txt"
   cp "$tmp/propose.txt" "$EVIDENCE_DIR/propose.txt"
+  cp "$tmp/improvement-health.txt" "$EVIDENCE_DIR/improvement-health.txt"
   cp "$tmp/tools.json" "$EVIDENCE_DIR/tools.json"
   jq '{operation,protocol_version,result:{stories:[.result.stories[] | select(.runnable or (.id | test("^US-09[3-6]$")))]}}' \
     "$tmp/stories.json" >"$EVIDENCE_DIR/selection-and-proxies.json"

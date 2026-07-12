@@ -1,0 +1,42 @@
+{
+  "schema": "e11-us100-premerge-smokes-v1",
+  "recorded_at": "2026-07-12T11:02:30Z",
+  "symphony": {
+    "tag": "symphony-v0.1.0",
+    "source_commit": "2357bc4f333a12794f975a46dbc0df96599fe4c0",
+    "platform": "macos-arm64",
+    "archive_sha256": "eb9d56bde05581c1fba56984937159218d4829b339385eb4ebafce835c049d90"
+  },
+  "scenarios": [
+    {
+      "name": "initial-protocol-release",
+      "harness_label": "harness-cli-v0.1.14",
+      "harness_cli_sha256": "0adcd5360cd636c189fe0cd958e5b73261f7012a4e43631f08c61269c785caf9",
+      "run_id": "run_1783854140212482000_82364_0",
+      "logical_before": "6ea5e455681b45c2a946ddb81183247cff0b25927688af8efce36e4948776896",
+      "logical_after": "159bec26eca6185368c474125506d4f5d2cf1f25f6b196095190079657f2f012",
+      "status": "pass"
+    },
+    {
+      "name": "cleaned-develop-candidate",
+      "harness_label": "harness-cli-v0.1.14-candidate",
+      "harness_source_commit": "64a923e5ebdb78a03b561ac957436461e3c66b1d",
+      "harness_cli_sha256": "c99e84063058e3d1e3cb6bb9f78f1a63e2d169533e1817bfd711c29e54e9400d",
+      "run_id": "run_1783854143474733000_82832_0",
+      "logical_before": "359667b4ddaa58719393085a92ad083d2d71566a77cc37ae97ad2ee005003fe2",
+      "logical_after": "bf2d0b8c3daf41e7da95615d596046ba6965d3c795161b5ba9dcc59376b1af50",
+      "status": "pass"
+    }
+  ],
+  "assertions": {
+    "checksum_verified": true,
+    "outside_both_clones": true,
+    "doctor": true,
+    "work_list": true,
+    "prepare_only": true,
+    "deterministic_execution": true,
+    "web_health_and_assets": true,
+    "sync_first_operations": 3,
+    "sync_second_operations": 0
+  }
+}

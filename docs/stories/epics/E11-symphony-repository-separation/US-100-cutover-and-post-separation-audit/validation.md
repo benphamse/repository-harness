@@ -51,3 +51,29 @@ Pending implementation. The final report must name the Symphony release and
 both Harness release SHAs/tags, artifact checksums, discovered protocol tuples,
 both smoke outputs, active-state audit, rollback artifacts, and
 observation-window end condition.
+
+## Executable Story Gate
+
+Use the readiness gate after both releases and both released smokes exist, but
+before starting the observation window:
+
+```bash
+scripts/verify-e11-us100.sh --readiness
+```
+
+Cause and effect: readiness proves that cutover is safe enough to observe, but
+it also asserts that `US-100` is still `in_progress`. It cannot complete the
+story.
+
+After at least seven calendar days **and** one complete real development/use
+cycle, record the clear blocking-signal audit and run:
+
+```bash
+tests/cutover/test-us100-observation-gate.sh
+scripts/verify-e11-us100.sh --final
+```
+
+The final mode repeats every readiness assertion, then validates the
+observation record. An early close, missing use cycle, blocking signal, or
+repair inside the counted window fails closed. A repair therefore creates a
+new start time and restarts all seven days instead of reusing elapsed time.
