@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-07-13 - PR #47
+
+- Fix post-merge CLI release recovery (@hoangnb24)
+- Merge commit: `48d8172d8850e7c334e8615f32fe4bbe17dd52a8`
+- Harness CLI candidate: `harness-cli-v0.1.17` (publication requires platform proof)
+- Changed files: 30 total (first 20 shown)
+  - `.github/workflows/harness-cli-release.yml`
+  - `.github/workflows/post-merge-maintenance.yml`
+  - `.github/workflows/premerge.yml`
+  - `.harness/changesets/run_1783916400_us102.changeset.jsonl`
+  - `CHANGELOG.md`
+  - `README.md`
+  - `docs/decisions/0005-prebuilt-rust-harness-cli.md`
+  - `docs/decisions/0010-proof-before-cli-release-promotion.md`
+  - `docs/stories/US-025-post-merge-cli-release-and-changelog.md`
+  - `docs/stories/epics/E12-harness-trust-boundaries/README.md`
+  - `docs/stories/epics/E12-harness-trust-boundaries/US-102-post-merge-release-recovery/design.md`
+  - `docs/stories/epics/E12-harness-trust-boundaries/US-102-post-merge-release-recovery/execplan.md`
+  - `docs/stories/epics/E12-harness-trust-boundaries/US-102-post-merge-release-recovery/overview.md`
+  - `docs/stories/epics/E12-harness-trust-boundaries/US-102-post-merge-release-recovery/validation.md`
+  - `scripts/README.md`
+  - `scripts/harness-cli-release-changed.sh`
+  - `scripts/promote-harness-cli-release-tag.sh`
+  - `scripts/validate-premerge.sh`
+  - `scripts/verify-harness-cli-release-identity.sh`
+  - `tests/docs/test-doc-contracts.sh`
+  - _… 10 additional file(s) omitted from this entry._
+
 ## 2026-07-13 - PR #46
 
 - Harden Harness trust boundaries and pre-merge proof (@hoangnb24)
