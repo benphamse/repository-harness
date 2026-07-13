@@ -57,5 +57,12 @@ transitions in the pull-request workflow.
   bootstrap correctly refused it. Intake `#1`, decision `0010`, and `US-102`
   were recorded in an isolated task database and replayable semantic changeset;
   the mixed database was not modified.
-- Hosted Linux/Windows transition proof and the eventual five-platform
-  `v0.1.17` promotion remain pending.
+- Pull-request run `29223964557` passed on the first attempt. Ubuntu completed
+  the full repository contract and pinned Linux x64 transition; Windows
+  completed the pinned download, frozen smoke, installer upgrade, and current
+  installed-candidate smoke.
+- `story verify US-102` reran the release recovery contract successfully. Trace
+  `#1` is detailed `3/3`, and intervention `#1` records the human correction
+  that reopened the prematurely completed release outcome.
+- The eventual five-platform `v0.1.17` promotion remains merge-gated, so the
+  story stays `in_progress` with E2E/platform proof unset.
