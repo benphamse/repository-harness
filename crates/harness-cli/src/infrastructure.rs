@@ -8,7 +8,11 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use rusqlite::{
-    params, types::ValueRef, Connection, OptionalExtension, Transaction, TransactionBehavior,
+    config::DbConfig,
+    hooks::{AuthAction, AuthContext, Authorization},
+    params,
+    types::ValueRef,
+    Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
 };
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -120,6 +124,10 @@ pub enum HarnessInfraError {
     NoTraces,
     #[error("story update: nothing to update")]
     EmptyStoryUpdate,
+    #[error("query sql: failed to enforce SQLite read-only mode: {0}")]
+    QuerySqlReadOnlyConfiguration(String),
+    #[error("query sql is read-only; use typed Harness commands, schema migrations, or db changeset apply for mutations")]
+    QuerySqlWriteDenied,
     #[error("changeset apply: {0}")]
     InvalidChangeset(String),
     #[error("changeset apply: unsupported operation '{0}'")]
@@ -567,6 +575,40 @@ impl SqliteHarnessRepository {
         let connection = Connection::open(&self.db_path)?;
         connection.busy_timeout(Duration::from_secs(5))?;
         connection.pragma_update(None, "foreign_keys", "ON")?;
+        Ok(connection)
+    }
+
+    fn open_existing_read_only(&self) -> Result<Connection> {
+        if !self.db_path.exists() {
+            return Err(HarnessInfraError::MissingDatabase(
+                self.db_path.display().to_string(),
+            ));
+        }
+
+        let connection = Connection::open_with_flags(
+            &self.db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        if !connection.set_db_config(DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE, true)? {
+            return Err(HarnessInfraError::QuerySqlReadOnlyConfiguration(
+                "checkpoint-on-close could not be disabled".to_owned(),
+            ));
+        }
+        if !connection.is_readonly(rusqlite::MAIN_DB)? {
+            return Err(HarnessInfraError::QuerySqlReadOnlyConfiguration(
+                "main database did not open read-only".to_owned(),
+            ));
+        }
+        connection.busy_timeout(Duration::from_secs(5))?;
+        connection.pragma_update(None, "foreign_keys", "ON")?;
+        connection.pragma_update(None, "query_only", "ON")?;
+        let query_only: i64 = connection.query_row("PRAGMA query_only;", [], |row| row.get(0))?;
+        if query_only != 1 {
+            return Err(HarnessInfraError::QuerySqlReadOnlyConfiguration(
+                "PRAGMA query_only did not remain enabled".to_owned(),
+            ));
+        }
+        connection.authorizer(Some(authorize_query_sql))?;
         Ok(connection)
     }
 
@@ -3743,25 +3785,29 @@ impl HarnessRepository for SqliteHarnessRepository {
     }
 
     fn query_sql(&self, sql: &str) -> Result<QueryTable> {
-        let connection = self.open_existing()?;
-        let mut statement = connection.prepare(sql)?;
+        let connection = self.open_existing_read_only()?;
+        let mut statement = connection.prepare(sql).map_err(query_sql_error)?;
         let headers = statement
             .column_names()
             .iter()
             .map(|value| value.to_string())
             .collect::<Vec<_>>();
         let column_count = statement.column_count();
-        let rows = statement.query_map([], |row| {
-            let mut values = Vec::new();
-            for index in 0..column_count {
-                values.push(sql_value_to_string(row.get_ref(index)?));
-            }
-            Ok(values)
-        })?;
+        let rows = statement
+            .query_map([], |row| {
+                let mut values = Vec::new();
+                for index in 0..column_count {
+                    values.push(sql_value_to_string(row.get_ref(index)?));
+                }
+                Ok(values)
+            })
+            .map_err(query_sql_error)?;
 
         Ok(QueryTable {
             headers,
-            rows: collect_rows(rows)?,
+            rows: rows
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .map_err(query_sql_error)?,
         })
     }
 }
@@ -4847,6 +4893,106 @@ fn is_decision_file_name(file_name: &str) -> bool {
         return false;
     };
     prefix.len() == 4 && prefix.chars().all(|character| character.is_ascii_digit())
+}
+
+fn authorize_query_sql(context: AuthContext<'_>) -> Authorization {
+    match context.action {
+        AuthAction::Select
+        | AuthAction::Read { .. }
+        | AuthAction::Function { .. }
+        | AuthAction::Recursive => Authorization::Allow,
+        AuthAction::Pragma {
+            pragma_name,
+            pragma_value,
+        } if query_sql_pragma_is_read_only(pragma_name, pragma_value) => Authorization::Allow,
+        _ => Authorization::Deny,
+    }
+}
+
+fn query_sql_pragma_is_read_only(name: &str, value: Option<&str>) -> bool {
+    let name = name.to_ascii_lowercase();
+    if matches!(
+        name.as_str(),
+        "foreign_key_check"
+            | "foreign_key_list"
+            | "index_info"
+            | "index_list"
+            | "index_xinfo"
+            | "integrity_check"
+            | "quick_check"
+            | "table_info"
+            | "table_list"
+            | "table_xinfo"
+    ) {
+        return true;
+    }
+
+    value.is_none()
+        && matches!(
+            name.as_str(),
+            "application_id"
+                | "auto_vacuum"
+                | "automatic_index"
+                | "cache_size"
+                | "cache_spill"
+                | "cell_size_check"
+                | "checkpoint_fullfsync"
+                | "collation_list"
+                | "compile_options"
+                | "data_version"
+                | "database_list"
+                | "default_cache_size"
+                | "defer_foreign_keys"
+                | "encoding"
+                | "foreign_keys"
+                | "freelist_count"
+                | "full_column_names"
+                | "fullfsync"
+                | "function_list"
+                | "hard_heap_limit"
+                | "ignore_check_constraints"
+                | "journal_mode"
+                | "journal_size_limit"
+                | "legacy_alter_table"
+                | "locking_mode"
+                | "max_page_count"
+                | "mmap_size"
+                | "module_list"
+                | "page_count"
+                | "page_size"
+                | "pragma_list"
+                | "query_only"
+                | "read_uncommitted"
+                | "recursive_triggers"
+                | "reverse_unordered_selects"
+                | "schema_version"
+                | "secure_delete"
+                | "short_column_names"
+                | "soft_heap_limit"
+                | "synchronous"
+                | "temp_store"
+                | "threads"
+                | "trusted_schema"
+                | "user_version"
+                | "wal_autocheckpoint"
+                | "writable_schema"
+        )
+}
+
+fn query_sql_error(error: rusqlite::Error) -> HarnessInfraError {
+    if matches!(
+        &error,
+        rusqlite::Error::SqliteFailure(sqlite_error, _)
+            if matches!(
+                sqlite_error.code,
+                rusqlite::ErrorCode::AuthorizationForStatementDenied
+                    | rusqlite::ErrorCode::ReadOnly
+            )
+    ) {
+        HarnessInfraError::QuerySqlWriteDenied
+    } else {
+        HarnessInfraError::Sqlite(error)
+    }
 }
 
 fn sql_value_to_string(value: ValueRef<'_>) -> String {
@@ -9513,6 +9659,224 @@ implemented
             )
             .unwrap();
         assert_eq!(rebuilt_order, live_order);
+    }
+
+    #[test]
+    fn query_sql_keeps_select_cte_pragma_and_explain_reads_available() {
+        let (_temp, repository) = isolated_test_repository();
+        repository.init().unwrap();
+        repository
+            .add_story(StoryAddInput {
+                id: "US-SQL-READ".to_owned(),
+                title: "Read-only SQL".to_owned(),
+                risk_lane: RiskLane::Normal,
+                contract_doc: None,
+                verify_command: Some(passing_command().to_owned()),
+                notes: None,
+            })
+            .unwrap();
+
+        let selected = repository
+            .query_sql("SELECT id, title FROM story WHERE id='US-SQL-READ';")
+            .unwrap();
+        assert_eq!(selected.headers, ["id", "title"]);
+        assert_eq!(
+            selected.rows,
+            [["US-SQL-READ".to_owned(), "Read-only SQL".to_owned()]]
+        );
+
+        let cte = repository
+            .query_sql(
+                "WITH selected AS (
+                     SELECT id FROM story WHERE id='US-SQL-READ'
+                 )
+                 SELECT id FROM selected;",
+            )
+            .unwrap();
+        assert_eq!(cte.headers, ["id"]);
+        assert_eq!(cte.rows, [["US-SQL-READ".to_owned()]]);
+
+        let table_info = repository.query_sql("PRAGMA table_info(story);").unwrap();
+        assert_eq!(
+            table_info.headers,
+            ["cid", "name", "type", "notnull", "dflt_value", "pk"]
+        );
+        assert!(table_info.rows.iter().any(|row| row[1] == "id"));
+        assert_eq!(
+            repository.query_sql("PRAGMA foreign_keys;").unwrap().rows,
+            [["1".to_owned()]]
+        );
+
+        let explain = repository
+            .query_sql("EXPLAIN SELECT title FROM story WHERE id='US-SQL-READ';")
+            .unwrap();
+        assert!(!explain.rows.is_empty());
+        assert_eq!(
+            repository
+                .open_existing()
+                .unwrap()
+                .query_row(
+                    "SELECT title FROM story WHERE id='US-SQL-READ';",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "Read-only SQL"
+        );
+    }
+
+    #[test]
+    fn query_sql_is_physically_read_only_across_statement_shapes() {
+        fn assert_denied(error: HarnessInfraError, sql: &str) {
+            assert!(
+                matches!(error, HarnessInfraError::QuerySqlWriteDenied),
+                "expected read-only denial for {sql}, got {error}"
+            );
+        }
+
+        let (_temp, repository) = isolated_test_repository();
+        let repository = repository.with_run_id("run_query_sql_read_only");
+        repository.init().unwrap();
+        repository
+            .add_story(StoryAddInput {
+                id: "US-SQL-SENTINEL".to_owned(),
+                title: "Mutation sentinel".to_owned(),
+                risk_lane: RiskLane::Normal,
+                contract_doc: None,
+                verify_command: Some(passing_command().to_owned()),
+                notes: None,
+            })
+            .unwrap();
+        let changeset = repository.changeset_path("run_query_sql_read_only");
+        let operation_log_before = fs::read_to_string(&changeset).unwrap();
+
+        let mutations = [
+            "DELETE FROM story WHERE id='US-SQL-SENTINEL';",
+            "UPDATE story SET title='mutated' WHERE id='US-SQL-SENTINEL' RETURNING id;",
+            "WITH doomed(id) AS (
+                 SELECT id FROM story WHERE id='US-SQL-SENTINEL'
+             )
+             DELETE FROM story WHERE id IN (SELECT id FROM doomed) RETURNING id;",
+            "PRAGMA user_version = 999;",
+            "CREATE TEMP TABLE query_sql_temp(value TEXT);",
+        ];
+
+        for sql in mutations {
+            assert_denied(repository.query_sql(sql).unwrap_err(), sql);
+            let connection = repository.open_existing().unwrap();
+            let unchanged: (String, i64) = connection
+                .query_row(
+                    "SELECT title, (SELECT user_version FROM pragma_user_version)
+                     FROM story WHERE id='US-SQL-SENTINEL';",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(unchanged, ("Mutation sentinel".to_owned(), 0));
+            assert_eq!(
+                fs::read_to_string(&changeset).unwrap(),
+                operation_log_before
+            );
+        }
+
+        for sql in [
+            "PRAGMA query_only=OFF;",
+            "PRAGMA query_only=OFF;
+             DELETE FROM story WHERE id='US-SQL-SENTINEL';",
+            "PRAGMA journal_mode=DELETE;",
+            "PRAGMA wal_checkpoint(TRUNCATE);",
+        ] {
+            assert_denied(repository.query_sql(sql).unwrap_err(), sql);
+        }
+        assert_eq!(fs::read_to_string(changeset).unwrap(), operation_log_before);
+        assert_eq!(
+            repository
+                .query_sql("SELECT title FROM story WHERE id='US-SQL-SENTINEL';")
+                .unwrap()
+                .rows,
+            [["Mutation sentinel".to_owned()]]
+        );
+    }
+
+    #[test]
+    fn query_sql_cannot_attach_or_checkpoint_external_state() {
+        fn assert_denied(error: HarnessInfraError, sql: &str) {
+            assert!(
+                matches!(error, HarnessInfraError::QuerySqlWriteDenied),
+                "expected read-only denial for {sql}, got {error}"
+            );
+        }
+
+        let (temp, repository) = isolated_test_repository();
+        repository.init().unwrap();
+
+        let missing = temp.path().join("query-sql-created.db");
+        let missing_sql = format!(
+            "ATTACH DATABASE '{}' AS external;",
+            missing.to_string_lossy().replace('\'', "''")
+        );
+        assert_denied(
+            repository.query_sql(&missing_sql).unwrap_err(),
+            &missing_sql,
+        );
+        assert!(!missing.exists());
+
+        let existing = temp.path().join("query-sql-existing.db");
+        let external = Connection::open(&existing).unwrap();
+        external
+            .execute_batch(
+                "CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES('safe');",
+            )
+            .unwrap();
+        drop(external);
+        let external_before = fs::read(&existing).unwrap();
+        for sql in [
+            format!(
+                "ATTACH DATABASE '{}' AS external;",
+                existing.to_string_lossy().replace('\'', "''")
+            ),
+            format!(
+                "ATTACH DATABASE '{}' AS external; DELETE FROM external.sentinel;",
+                existing.to_string_lossy().replace('\'', "''")
+            ),
+        ] {
+            assert_denied(repository.query_sql(&sql).unwrap_err(), &sql);
+            assert_eq!(fs::read(&existing).unwrap(), external_before);
+        }
+
+        let writer = repository.open_existing().unwrap();
+        assert_eq!(
+            writer
+                .query_row("PRAGMA journal_mode=WAL;", [], |row| row
+                    .get::<_, String>(0))
+                .unwrap(),
+            "wal"
+        );
+        writer
+            .execute(
+                "INSERT INTO story (id,title,risk_lane) VALUES ('US-SQL-WAL','WAL sentinel','normal');",
+                [],
+            )
+            .unwrap();
+        let wal_path = repository.db_path.with_extension("db-wal");
+        let database_before = fs::read(&repository.db_path).unwrap();
+        let wal_before = fs::read(&wal_path).unwrap();
+        for sql in [
+            "PRAGMA wal_checkpoint(TRUNCATE);",
+            "PRAGMA wal_checkpoint(TRUNCATE); SELECT 1;",
+            "PRAGMA journal_mode=DELETE;",
+        ] {
+            assert_denied(repository.query_sql(sql).unwrap_err(), sql);
+            assert_eq!(fs::read(&repository.db_path).unwrap(), database_before);
+            assert_eq!(fs::read(&wal_path).unwrap(), wal_before);
+        }
+        assert_eq!(
+            repository.query_sql("PRAGMA journal_mode;").unwrap().rows,
+            [["wal".to_owned()]]
+        );
+        assert_eq!(fs::read(&repository.db_path).unwrap(), database_before);
+        assert_eq!(fs::read(&wal_path).unwrap(), wal_before);
+        drop(writer);
     }
 
     #[test]

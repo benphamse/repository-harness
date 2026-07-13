@@ -193,7 +193,7 @@ without parsing the human table.
 | `query tools` | Tool access | Show compiled and registered tool entries. | optional `--json`, `--summary`, `--responsibility`, `--capability`, `--status` |
 | `query interventions` | Intervention recording | Show intervention records. | optional `--trace`, `--story`, `--type` |
 | `query stats` | Task state | Show durable record counts. | none |
-| `query sql` | Tool access | Run arbitrary SQL against `harness.db`. | SQL text |
+| `query sql` | Tool access | Run one read-only SQL statement against `harness.db`. | SQL text |
 | `db changeset apply` | Task state | Apply one semantic changeset idempotently. | changeset path |
 | `db changeset status` | Task state | Parse and inspect one changeset ID/content SHA/applied state without writing. | changeset path, required `--json` |
 | `db snapshot` | Task state | Create an integrity-checked atomic SQLite online-backup snapshot. | `--output`, required `--json` |

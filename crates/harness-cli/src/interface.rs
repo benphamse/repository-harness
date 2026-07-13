@@ -643,7 +643,7 @@ enum QueryView {
     Stats,
     /// Read-only daily view of proposal, implementation, outcome, and recurrence health.
     ImprovementHealth,
-    /// Run arbitrary SQL.
+    /// Run one read-only SQL statement.
     Sql { query: Vec<String> },
 }
 

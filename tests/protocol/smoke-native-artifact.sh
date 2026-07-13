@@ -25,6 +25,19 @@ run story add --id US-A --title Alpha --lane normal --verify true --json >"$tmp/
 run story add --id US-B --title Beta --lane normal --verify true --json >"$tmp/add-b.json"
 jq -e '.result.changed and .result.story.id == "US-A"' "$tmp/add-a.json" >/dev/null
 
+run query sql "WITH selected AS (SELECT id FROM story WHERE id='US-A') SELECT id FROM selected;" >"$tmp/query-sql-read.txt"
+grep -Fq 'US-A' "$tmp/query-sql-read.txt"
+set +e
+HARNESS_RUN_ID=protocol_query_sql_write run query sql \
+  "WITH doomed AS (SELECT id FROM story WHERE id='US-A') DELETE FROM story WHERE id IN (SELECT id FROM doomed) RETURNING id;" \
+  >"$tmp/query-sql-write.out" 2>"$tmp/query-sql-write.err"
+query_sql_write_exit=$?
+set -e
+test "$query_sql_write_exit" -eq 1
+grep -Fq 'query sql is read-only' "$tmp/query-sql-write.err"
+test ! -e "$tmp/.harness/changesets/protocol_query_sql_write.changeset.jsonl"
+run query stories --json | jq -e '(.result.stories[] | select(.id == "US-A").title) == "Alpha"' >/dev/null
+
 run story dependency add --blocker US-A --blocked US-B --json >/dev/null
 run story hierarchy add --parent US-A --child US-B --json >/dev/null
 run query work-graph --json >"$tmp/graph-before.json"

@@ -99,6 +99,11 @@ scripts/bin/harness-cli db changeset apply ...
 scripts/bin/harness-cli db rebuild --from ...
 ```
 
+`query sql` accepts one read-only SQLite statement. The CLI enforces read-only
+access at the database connection, including for CTEs, pragmas, and statements
+with `RETURNING`; use typed Harness mutation commands, migrations, or semantic
+changesets for writes.
+
 `scripts/bin/harness-cli import brownfield` seeds or refreshes the durable database
 from existing Harness v0 markdown in `docs/TEST_MATRIX.md`,
 `docs/decisions/`, and `docs/HARNESS_BACKLOG.md`. This keeps already-installed

@@ -590,7 +590,7 @@ pub fn compiled_tool_registry() -> Vec<ToolEntry> {
             "harness-cli",
             "query sql",
             "query sql",
-            "Run arbitrary SQL against harness.db.",
+            "Run one read-only SQL statement against harness.db.",
             &[("query", "string", true)],
             "Tool access",
             "0.1.0",
