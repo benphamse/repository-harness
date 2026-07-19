@@ -121,6 +121,32 @@ the code level even when the storage layer is simple:
 - Queries read state and format for consumers.
 - Shared domain rules live in domain/application, not controllers.
 
+## Infra & Ops Surfaces
+
+For repos where the consumer stack is infrastructure rather than an
+application (Terraform/CloudFormation/Bicep modules, Kubernetes manifests and
+Helm charts, CI/CD pipeline definitions, observability configuration), the
+boundary and discovery thinking still applies, with these surfaces standing
+in for the app-layer ones above:
+
+- Boundary inputs: cloud provider API responses, IaC state files, Kubernetes
+  API objects, webhook/event payloads from CI systems, secrets resolved at
+  deploy time.
+- Core domains: environments (dev/staging/prod), workloads/services, network
+  and identity boundaries (VPCs, IAM roles, service accounts), alerting and
+  SLO definitions.
+- Parse-first still applies: a `terraform plan`/`kubectl diff` (or provider
+  equivalent) output is the parsed, typed view of the change; do not apply an
+  IaC or manifest change straight to production without reviewing that
+  output first.
+- Validation ladder here usually looks like: lint/static-analyze the IaC or
+  manifest -> plan/dry-run against a non-prod target -> apply to a lower
+  environment -> apply to production with a rollback path recorded.
+
+This is a thinking template, not a scaffold. Do not generate Terraform
+modules, Helm charts, or pipeline files speculatively — create them only when
+a real story or spec calls for that specific infrastructure.
+
 ## Observability Contract
 
 The future server should emit one canonical JSON log line per request with:

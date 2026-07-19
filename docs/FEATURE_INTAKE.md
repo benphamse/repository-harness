@@ -77,7 +77,10 @@ Use for story-sized behavior with bounded blast radius.
 
 Requirements:
 
-- Create or update one story file from `docs/templates/story.md`.
+- Create or update one story file from `docs/templates/story.md`. For
+  infra/IaC, cluster/runtime, or observability changes, use
+  `docs/templates/ops-change.md` instead — it captures blast radius,
+  plan/dry-run evidence, and rollback plan.
 - Link relevant product docs.
 - Add or update validation expectations.
 - Implement the smallest vertical slice when implementation exists.
@@ -116,6 +119,27 @@ Mark one flag for each item that applies:
 | Existing behavior | already implemented or test-covered behavior changes |
 | Weak proof | unclear or missing tests around the affected area |
 | Multi-domain | more than one product domain changes at once |
+| Infra/IaC | Terraform, CloudFormation, Bicep, Pulumi, or other declarative infra state |
+| Cluster/runtime config | Kubernetes manifests, Helm charts, service mesh, autoscaling, ingress |
+| Cloud identity | IAM roles/policies, service principals, workload identity, secrets stores |
+| Observability | logging pipelines, metrics/alerting rules, dashboards, tracing config |
+| Deploy/rollback | CI/CD pipeline definitions, deployment gates, release or rollback steps |
+
+## Ops-Focused Notes
+
+These flags exist because the risk that matters most for infra and ops repos
+is rarely code correctness in the unit-test sense — it is blast radius:
+what breaks in production, for how many users, and how fast it can be rolled
+back. Use them alongside the general flags, not instead of them.
+
+- Prefer a `plan`/dry-run step before any Infra/IaC or Cluster/runtime change
+  and attach its output as evidence.
+- Treat changes that remove or weaken an alert, dashboard, or log signal the
+  same as removing test coverage: it is a Weak proof flag even if the code
+  itself is simple.
+- A change scoped to non-production environments only (dev/staging) can stay
+  in a lower lane even with an Infra/IaC or Cluster/runtime flag; note the
+  environment scope explicitly in the intake output.
 
 ## Classification
 
@@ -141,6 +165,10 @@ Hard gates:
 - Audit/security.
 - External provider behavior.
 - Removing or weakening validation requirements.
+- Cloud identity changes affecting production (IAM policy, workload identity,
+  secrets store access).
+- Infra/IaC or cluster/runtime changes applied directly to production without
+  a reviewed plan/dry-run.
 
 ## Output
 

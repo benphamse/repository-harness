@@ -19,6 +19,38 @@ This project is exploring a simple idea:
 
 > Coding agents do not only need better prompts. They need better repositories.
 
+## Built For Infra And Ops-Heavy Repos
+
+The harness pattern is stack-agnostic, but it is especially valuable in repos
+where the blast radius of a wrong agent change is an outage, a security
+incident, or a bad rollout rather than a failed unit test. That is the daily
+reality for:
+
+- **DevSecOps engineers** — IaC changes (Terraform, CloudFormation, Bicep),
+  policy-as-code, secrets and identity boundaries, CI/CD pipeline hardening.
+- **Platform engineers** — Kubernetes platform config, internal developer
+  platforms, multi-cloud (AWS, Azure, GCP) landing zones, service meshes.
+- **SRE engineers** — production runbooks, alerting and paging config,
+  capacity and reliability tradeoffs, incident-driven changes under time
+  pressure.
+- **AIOps / observability engineers** — logging pipelines, monitoring and
+  alert rules, distributed tracing, anomaly detection and automation glue.
+
+In these repos, the missing context an agent needs is rarely "how does this
+function work" — it is "what is the blast radius of this change, what proof
+of safety is required before it ships, and what tradeoff did the last on-call
+already make here." The Harness intake, risk lanes, and decision records exist
+to make that context explicit instead of trapped in someone's head or a closed
+incident channel.
+
+Common technology surfaces this harness pattern applies well to:
+
+- Cloud providers: AWS, Azure, GCP
+- Container and orchestration: Kubernetes, Docker, Helm
+- Infrastructure as code: Terraform, CloudFormation, Bicep, Pulumi
+- Observability: logging, metrics/monitoring, distributed tracing, alerting
+- CI/CD: pipeline definitions, deployment gates, release automation
+
 ## The Problem
 
 Most repos are built for humans reading code in a familiar codebase. Coding
@@ -58,38 +90,38 @@ In this repo, those answers live in:
 OpenAI describes this shift as an agent-first world where humans steer and
 agents execute:
 
-https://openai.com/index/harness-engineering/
+<https://openai.com/index/harness-engineering/>
 
 ## Install Harness Into A Project
 
 From a target project directory, run:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
+curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
 ```
 
 On Windows PowerShell, run:
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.ps1"))) -Yes
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.ps1"))) -Yes
 ```
 
 If the target already has `AGENTS.md`, `docs/`, or `scripts/`, choose one:
 
 ```bash
 # Update an existing Harness repo without moving existing files
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --yes
+curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --yes
 
 # Back up and replace AGENTS.md, docs/, and scripts/
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --override --yes
+curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --override --yes
 ```
 
 ```powershell
 # Update an existing Harness repo without moving existing files
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.ps1"))) -Merge -Yes
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.ps1"))) -Merge -Yes
 
 # Back up and replace AGENTS.md, docs/, and scripts/
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.ps1"))) -Override -Yes
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.ps1"))) -Override -Yes
 ```
 
 Use `--merge` when a project already has Harness and you want to append newly
@@ -101,7 +133,7 @@ For older Harness installs whose `AGENTS.md` still contains the full generated
 operating guide, refresh it into the small stable shim:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
+curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
 ```
 
 The refresh backs up the existing file. If it detects the old
@@ -117,17 +149,17 @@ retrieval entrypoint. An existing `CLAUDE.md` gets the block appended after a
 backup; plain installs without the flag never touch `CLAUDE.md`:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --claude --yes
+curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --claude --yes
 ```
 
 Or install into a specific path:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --directory /path/to/project --yes
+curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --directory /path/to/project --yes
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.ps1"))) -Directory C:\path\to\project -Yes
+& ([scriptblock]::Create((irm "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.ps1"))) -Directory C:\path\to\project -Yes
 ```
 
 Use `--dry-run` on Bash or `-DryRun` on PowerShell to preview changes before
@@ -294,4 +326,6 @@ Short description:
 
 > An agent-ready repo harness for Claude Code, Codex, Cursor, and other coding
 > agents: AGENTS.md, product contracts, story packets, validation matrix, and
-> decision records.
+> decision records. Built for infra and ops-heavy repos — DevSecOps, Platform,
+> SRE, and AIOps engineering across AWS, Azure, GCP, Kubernetes, Terraform,
+> logging, monitoring, and tracing.
