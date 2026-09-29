@@ -1,5 +1,389 @@
 # Changelog
 
+## 2026-08-13 - PR #66
+
+- fix(installer): reject unknown PowerShell parameters (@hoangnb24)
+- Merge commit: `f5d62061eab48364151e89aaf2c518a6a11a3178`
+- Harness core candidate: `harness-v0.1.10` (publication requires platform proof)
+- Changed files: 1 total
+  - `scripts/install-harness.ps1`
+
+## 2026-08-13 - PR #65
+
+- feat(harness): encode authoritative invariants (@hoangnb24)
+- Merge commit: `33af7f860790afbe0e2db0894249318632ed7e7a`
+- Harness core candidate: `harness-v0.1.9` (publication requires platform proof)
+- Changed files: 23 total (first 20 shown)
+  - `.agents/skills/encode-invariant/SKILL.md`
+  - `.agents/skills/encode-invariant/agents/openai.yaml`
+  - `.agents/skills/onboard-repository/SKILL.md`
+  - `AGENTS.md`
+  - `README.md`
+  - `crates/harness/src/infrastructure/embedded_distribution.rs`
+  - `docs/HARNESS.md`
+  - `docs/README.md`
+  - `docs/WORKFLOW.md`
+  - `docs/decisions/0028-authoritative-invariant-encoding.md`
+  - `docs/decisions/README.md`
+  - `docs/patterns/encoding-invariants.md`
+  - `docs/plans/completed/p1-encode-invariants.md`
+  - `docs/product/installation-profiles.md`
+  - `scripts/agent-harness-block.md`
+  - `scripts/harness-install-files.txt`
+  - `scripts/harness-release-changed.sh`
+  - `tests/docs/test-doc-contracts.sh`
+  - `tests/installer/assert-agent-authority-contract.sh`
+  - `tests/installer/test-install-harness-modes.ps1`
+  - _… 3 additional file(s) omitted from this entry._
+
+## 2026-08-10 - PR #64
+
+- refactor(core): end protocol v1 support (@hoangnb24)
+- Merge commit: `1df6b301636de2268aa06b0bac5b85b3541ac274`
+- Harness core candidate: `harness-v0.1.8` (publication requires platform proof)
+- Changed files: 396 total (first 20 shown)
+  - `.github/ISSUE_TEMPLATE/real-world-example.md`
+  - `.github/workflows/harness-cli-release.yml`
+  - `.github/workflows/harness-release.yml`
+  - `.github/workflows/post-merge-maintenance.yml`
+  - `.github/workflows/premerge.yml`
+  - `.gitignore`
+  - `.harness/changesets/run_1783916400_us102.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_execution_intake.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_reproducible_core_state.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us115.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us116.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us117.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us117_complete.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us118.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us119.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784535496798252000_0000047583_000000.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784549926906970000_0000020925_000000.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784550199340549000_0000025691_000000.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784550758040287000_0000037021_000000.changeset.jsonl`
+  - `.harness/core-state/harness.db`
+  - _… 376 additional file(s) omitted from this entry._
+
+## Unreleased - Protocol v1 end of life
+
+- End support for the SQLite protocol-v1 control plane and `harness-cli`.
+- Keep `harness-cli-v0.1.22` as the last published compatibility release; Git
+  history and immutable release artifacts remain the archive.
+- Focus current development and releases on the repository protocol and the
+  safe `harness` installer/updater.
+- Preserve pre-existing legacy databases, schemas, scripts, and CLI binaries
+  during install and update; removal remains consumer-owned.
+
+## 2026-07-23 - PR #62
+
+- feat(skills): install repository onboarding workflow (@hoangnb24)
+- Merge commit: `ed6be08a8407fc000db7fe2ef34fcfab8d39605c`
+- Harness CLI release: not required
+- Harness core candidate: `harness-v0.1.7` (publication requires platform proof)
+- Changed files: 27 total (first 20 shown)
+  - `.agents/skills/audit-onboarding-proposal/SKILL.md`
+  - `.agents/skills/audit-onboarding-proposal/agents/openai.yaml`
+  - `.agents/skills/audit-onboarding-proposal/scripts/validate_evidence_capsule.py`
+  - `.agents/skills/onboard-repository/SKILL.md`
+  - `.agents/skills/onboard-repository/agents/openai.yaml`
+  - `.agents/skills/onboard-repository/references/evidence-capsule-v1.md`
+  - `.agents/skills/onboard-repository/references/evidence-capsule-v2.md`
+  - `.agents/skills/onboard-repository/scripts/emit_evidence_bundle.py`
+  - `.agents/skills/onboard-repository/scripts/render_patch.py`
+  - `README.md`
+  - `crates/harness/src/infrastructure/embedded_distribution.rs`
+  - `docs/README.md`
+  - `docs/decisions/0020-installation-profiles-and-knowledge-boundaries.md`
+  - `docs/decisions/0023-optional-consumer-ownership.md`
+  - `docs/decisions/0026-explicit-onboarding-skills-in-default-core.md`
+  - `docs/decisions/README.md`
+  - `docs/plans/active/application-legibility.md`
+  - `docs/product/installation-profiles.md`
+  - `scripts/README.md`
+  - `scripts/harness-install-files.txt`
+  - _… 7 additional file(s) omitted from this entry._
+
+## 2026-07-22 - PR #61
+
+- test(harness): derive update candidate versions (@hoangnb24)
+- Merge commit: `03169e22e9fb2d15a8245773da50913191ed9e33`
+- Harness CLI release: not required
+- Harness core candidate: `harness-v0.1.6` (publication requires platform proof)
+- Changed files: 1 total
+  - `crates/harness/tests/release_update.rs`
+
+## 2026-07-22 - PR #60
+
+- feat(harness): add latest-release self-update (@hoangnb24)
+- Merge commit: `dac022bd81ca411abf50c5056c9dd9989134bafb`
+- Harness CLI candidate: `harness-cli-v0.1.23` (publication requires platform proof)
+- Harness core candidate: `harness-v0.1.5` (publication requires platform proof)
+- Changed files: 35 total (first 20 shown)
+  - `.github/workflows/harness-release.yml`
+  - `Cargo.lock`
+  - `README.md`
+  - `crates/harness/Cargo.toml`
+  - `crates/harness/src/application/mod.rs`
+  - `crates/harness/src/application/ports.rs`
+  - `crates/harness/src/application/self_update.rs`
+  - `crates/harness/src/application/service.rs`
+  - `crates/harness/src/domain/model.rs`
+  - `crates/harness/src/infrastructure/filesystem_state.rs`
+  - `crates/harness/src/infrastructure/git_merge.rs`
+  - `crates/harness/src/infrastructure/mod.rs`
+  - `crates/harness/src/infrastructure/release_handoff.rs`
+  - `crates/harness/src/interface/cli.rs`
+  - `crates/harness/src/interface/mod.rs`
+  - `crates/harness/src/interface/presenter.rs`
+  - `crates/harness/src/main.rs`
+  - `crates/harness/tests/clean_architecture.rs`
+  - `crates/harness/tests/release_update.rs`
+  - `crates/harness/tests/update_lifecycle.rs`
+  - _… 15 additional file(s) omitted from this entry._
+
+## 2026-07-22 - PR #59
+
+- chore(repo): remove obsolete migration artifacts (@hoangnb24)
+- Merge commit: `fc0e5f7cd4d27030fbede293946a071eaebe6d44`
+- Harness CLI release: not required
+- Harness core candidate: `harness-v0.1.4` (publication requires platform proof)
+- Changed files: 51 total (first 20 shown)
+  - `PHASE2.md`
+  - `PHASE4.md`
+  - `PHASE5.md`
+  - `README.md`
+  - `docs/HARNESS_COMPONENTS.md`
+  - `docs/README.md`
+  - `docs/compatibility/phase-3-active-observability-legacy.md`
+  - `docs/compatibility/phase-4-mechanical-verification-legacy.md`
+  - `docs/compatibility/phase-5-evolution-infrastructure-legacy.md`
+  - `docs/contracts/harness-orchestration-v1.md`
+  - `docs/decisions/0021-consumer-first-application-legibility-phase.md`
+  - `docs/plans/README.md`
+  - `docs/plans/active/application-legibility.md`
+  - `docs/plans/completed/README.md`
+  - `docs/plans/completed/repository-cleanup.md`
+  - `scripts/e11-us089-baseline.py`
+  - `scripts/e11-us097-dispositions.py`
+  - `scripts/e11-us097-inventory.py`
+  - `scripts/e11-us097-prepare-core.py`
+  - `scripts/run-e11-us089-frozen-baseline.sh`
+  - _… 31 additional file(s) omitted from this entry._
+
+## 2026-07-21 - PR #58
+
+- Isolate core release artifacts (@hoangnb24)
+- Merge commit: `e5470216aafe441197ace9f34365e398be57a0b4`
+- Harness CLI release: not required
+- Harness core candidate: `harness-v0.1.3` (publication requires platform proof)
+- Changed files: 7 total
+  - `.github/workflows/harness-release.yml`
+  - `scripts/harness-release-changed.sh`
+  - `scripts/validate-premerge.sh`
+  - `scripts/verify-harness-release-assets.sh`
+  - `tests/maintenance/test-harness-release-classification.sh`
+  - `tests/release/test-harness-release-asset-inventory.sh`
+  - `tests/release/test-harness-release-workflow-contract.sh`
+
+## 2026-07-21 - PR #57
+
+- Fix release verification bootstrap (@hoangnb24)
+- Merge commit: `b7dac2b4bf8e3201c6ac5b8e096662571068b554`
+- Harness CLI candidate: `harness-cli-v0.1.22` (publication requires platform proof)
+- Harness core candidate: `harness-v0.1.2` (publication requires platform proof)
+- Changed files: 4 total
+  - `.github/workflows/harness-cli-release.yml`
+  - `.github/workflows/harness-release.yml`
+  - `tests/release/test-harness-release-workflow-contract.sh`
+  - `tests/release/test-release-workflow-contract.sh`
+
+## 2026-07-21 - PR #56
+
+- feat(harness): set core maintenance CLI direction (@hoangnb24)
+- Merge commit: `d5bb4db1760d764f24343838f0bda4fc42f079af`
+- Harness CLI candidate: `harness-cli-v0.1.21` (publication requires platform proof)
+- Harness core candidate: `harness-v0.1.1` (publication requires platform proof)
+- Changed files: 61 total (first 20 shown)
+  - `.github/workflows/harness-release.yml`
+  - `.github/workflows/post-merge-maintenance.yml`
+  - `.gitignore`
+  - `AGENTS.md`
+  - `Cargo.lock`
+  - `Cargo.toml`
+  - `README.md`
+  - `crates/harness/Cargo.toml`
+  - `crates/harness/assets/docs/decisions/README.md`
+  - `crates/harness/assets/docs/plans/README.md`
+  - `crates/harness/assets/docs/plans/completed/README.md`
+  - `crates/harness/src/application/mod.rs`
+  - `crates/harness/src/application/ports.rs`
+  - `crates/harness/src/application/service.rs`
+  - `crates/harness/src/domain/mod.rs`
+  - `crates/harness/src/domain/model.rs`
+  - `crates/harness/src/infrastructure/embedded_distribution.rs`
+  - `crates/harness/src/infrastructure/filesystem_state.rs`
+  - `crates/harness/src/infrastructure/git_merge.rs`
+  - `crates/harness/src/infrastructure/mod.rs`
+  - _… 41 additional file(s) omitted from this entry._
+
+## 2026-07-21 - PR #55
+
+- feat(phase5): split optional consumer ownership (@hoangnb24)
+- Merge commit: `e5a5e2464ed5999cb07f2155d1eafb6e79d69a65`
+- Harness CLI release: not required
+- Changed files: 16 total
+  - `PHASE5.md`
+  - `README.md`
+  - `docs/HARNESS_COMPONENTS.md`
+  - `docs/README.md`
+  - `docs/compatibility/README.md`
+  - `docs/compatibility/phase-5-evolution-infrastructure-legacy.md`
+  - `docs/decisions/0023-optional-consumer-ownership.md`
+  - `docs/decisions/README.md`
+  - `docs/plans/README.md`
+  - `docs/plans/completed/README.md`
+  - `docs/plans/completed/phase-5-optional-consumer-split.md`
+  - `scripts/validate-premerge.sh`
+  - `tests/boundary/test-phase5-optional-consumer-split.sh`
+  - `tests/docs/test-doc-contracts.sh`
+  - `tests/workflow/test-repository-workflow.sh`
+  - `tests/workflow/test-task-authority.sh`
+
+## 2026-07-21 - PR #54
+
+- feat(phase4): freeze upstream lifecycle writes (@hoangnb24)
+- Merge commit: `3b6ede042847fe71ee8537c43cb55e9e6d57f300`
+- Harness CLI candidate: `harness-cli-v0.1.20` (publication requires platform proof)
+- Changed files: 18 total
+  - `PHASE4.md`
+  - `crates/harness-cli/src/interface.rs`
+  - `docs/HARNESS.md`
+  - `docs/README.md`
+  - `docs/compatibility/README.md`
+  - `docs/compatibility/phase-4-mechanical-verification-legacy.md`
+  - `docs/compatibility/phase-4-write-consumer-inventory.md`
+  - `docs/contracts/harness-orchestration-v1.md`
+  - `docs/decisions/0022-control-plane-freeze-and-compatibility-runway.md`
+  - `docs/decisions/README.md`
+  - `docs/plans/README.md`
+  - `docs/plans/completed/README.md`
+  - `docs/plans/completed/phase-4-control-plane-freeze.md`
+  - `scripts/README.md`
+  - `scripts/validate-premerge.sh`
+  - `tests/boundary/test-phase4-control-plane-freeze.sh`
+  - `tests/changesets/test-automatic-source-capture.sh`
+  - `tests/docs/test-doc-contracts.sh`
+
+## 2026-07-21 - PR #53
+
+- docs(harness): establish Phase 3 application-legibility evidence (@hoangnb24)
+- Merge commit: `225987a250ba522c307c0a4ed19f30d9f146a84e`
+- Harness CLI release: not required
+- Changed files: 19 total
+  - `AGENTS.md`
+  - `PHASE3.md`
+  - `PHASE4.md`
+  - `PHASE5.md`
+  - `docs/README.md`
+  - `docs/WORKFLOW.md`
+  - `docs/compatibility/README.md`
+  - `docs/compatibility/phase-3-active-observability-legacy.md`
+  - `docs/decisions/0020-installation-profiles-and-knowledge-boundaries.md`
+  - `docs/decisions/0021-consumer-first-application-legibility-phase.md`
+  - `docs/decisions/README.md`
+  - `docs/plans/completed/README.md`
+  - `docs/plans/completed/phase-3-decision-boundary-replay.md`
+  - `docs/plans/completed/phase-3-durable-state-publication.md`
+  - `docs/plans/completed/phase-3-e-inna-brain-application-legibility-pilot.md`
+  - `scripts/agent-harness-block.md`
+  - `tests/docs/test-doc-contracts.sh`
+  - `tests/evals/test-repository-workflow.sh`
+  - `tests/installer/assert-agent-authority-contract.sh`
+
+## 2026-07-21 - PR #52
+
+- feat(installer): make CLI an optional compatibility profile (@hoangnb24)
+- Merge commit: `5d31cee1f98b161c0b1124c4ff4a1024d94f2f94`
+- Harness CLI release: not required
+- Changed files: 23 total (first 20 shown)
+  - `README.md`
+  - `docs/README.md`
+  - `docs/compatibility/README.md`
+  - `docs/decisions/0019-repository-centered-default-workflow.md`
+  - `docs/decisions/0020-installation-profiles-and-knowledge-boundaries.md`
+  - `docs/decisions/README.md`
+  - `docs/plans/README.md`
+  - `docs/plans/completed/README.md`
+  - `docs/plans/completed/phase-2-knowledge-boundary-and-payload-reduction.md`
+  - `docs/product/installation-profiles.md`
+  - `docs/provenance/README.md`
+  - `scripts/README.md`
+  - `scripts/harness-cli-install-files.txt`
+  - `scripts/harness-install-files.txt`
+  - `scripts/install-harness.ps1`
+  - `scripts/install-harness.sh`
+  - `scripts/test-install-harness-cli-upgrade.sh`
+  - `tests/docs/test-doc-contracts.sh`
+  - `tests/installer/assert-agent-authority-contract.sh`
+  - `tests/installer/assert-consumer-changeset-trackable.sh`
+  - _… 3 additional file(s) omitted from this entry._
+
+## 2026-07-20 - PR #51
+
+- feat(workflow): adopt repository-centered default workflow (@hoangnb24)
+- Merge commit: `27411b2c33bc2199fe3dde27a3473ddcdcdfa333`
+- Harness CLI candidate: `harness-cli-v0.1.19` (publication requires platform proof)
+- Changed files: 48 total (first 20 shown)
+  - `AGENTS.md`
+  - `README.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/CONTEXT_RULES.md`
+  - `docs/FEATURE_INTAKE.md`
+  - `docs/GLOSSARY.md`
+  - `docs/HARNESS.md`
+  - `docs/HARNESS_AUDIT.md`
+  - `docs/HARNESS_BACKLOG.md`
+  - `docs/HARNESS_COMPONENTS.md`
+  - `docs/HARNESS_MATURITY.md`
+  - `docs/IMPROVEMENT_PROTOCOL.md`
+  - `docs/README.md`
+  - `docs/TEST_MATRIX.md`
+  - `docs/TOOL_REGISTRY.md`
+  - `docs/TRACE_SPEC.md`
+  - `docs/WORKFLOW.md`
+  - `docs/decisions/0001-harness-first-development.md`
+  - `docs/decisions/0003-generic-spec-intake-harness.md`
+  - `docs/decisions/0004-sqlite-durable-layer.md`
+  - _… 28 additional file(s) omitted from this entry._
+
+## 2026-07-20 - PR #50
+
+- feat(core-state): make source state reproducible (@hoangnb24)
+- Merge commit: `9552c55d25ab32ce745f5ad715cf58f38add1c54`
+- Harness CLI candidate: `harness-cli-v0.1.18` (publication requires platform proof)
+- Changed files: 71 total (first 20 shown)
+  - `.gitattributes`
+  - `.github/workflows/premerge.yml`
+  - `.gitignore`
+  - `.harness/changesets/run_20260720_e15_execution_intake.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_reproducible_core_state.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us115.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us116.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us117.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us117_complete.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us118.changeset.jsonl`
+  - `.harness/changesets/run_20260720_e15_us119.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784535496798252000_0000047583_000000.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784549926906970000_0000020925_000000.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784550199340549000_0000025691_000000.changeset.jsonl`
+  - `.harness/changesets/run_auto_01784550758040287000_0000037021_000000.changeset.jsonl`
+  - `.harness/core-state/harness.db`
+  - `.harness/core-state/manifest.json`
+  - `README.md`
+  - `crates/harness-cli/src/infrastructure.rs`
+  - `crates/harness-cli/src/interface.rs`
+  - _… 51 additional file(s) omitted from this entry._
+
 ## 2026-07-13 - PR #47
 
 - Fix post-merge CLI release recovery (@hoangnb24)

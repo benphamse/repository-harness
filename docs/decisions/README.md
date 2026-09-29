@@ -1,28 +1,36 @@
 # Decisions
 
-Decision records explain why important product, architecture, or harness choices
-were made.
+Decision records preserve lasting product, architecture, compatibility,
+security, data-ownership, and validation choices.
 
-Use `docs/templates/decision.md` when adding a new decision.
+Use `docs/templates/decision.md`. Task-local choices stay in the active plan.
 
-After adding or updating a markdown decision file, also add or refresh the
-durable decision row:
+## Current Upstream Decisions
 
-```bash
-scripts/bin/harness-cli decision add \
-  --id 0008-auth-boundary \
-  --title "Auth Boundary" \
-  --doc docs/decisions/0008-auth-boundary.md
-```
+| Decision | Title |
+| --- | --- |
+| 0019 | Repository-Centered Default Workflow |
+| 0020 | Installation Profiles And Knowledge Boundaries |
+| 0024 | Rust Harness Core Maintenance CLI |
+| 0025 | Latest-Release Self-Update And Human-Directed Conflicts |
+| 0026 | Explicit Onboarding Skills In Default Core |
+| 0027 | End Protocol V1 And Focus The Repository Protocol |
+| 0028 | Authoritative Invariant Encoding |
 
-Trace fields such as `--decisions` summarize task-level choices. They do not
-count as the Harness decision log.
+These decisions describe upstream Harness. Installed consumers begin with an
+empty decision index and add only real consumer choices.
 
-Add a decision when:
+## History
 
-- A locked technical choice changes.
-- A product rule changes meaningfully.
-- A validation requirement is added, removed, or weakened.
-- A high-risk feature chooses one design over another.
-- Auth, authorization, data ownership, audit/security, or API behavior changes.
-- The source-of-truth hierarchy changes.
+Superseded database lifecycle, story, trace, orchestration, and migration
+decisions remain available through Git history. They are absent from the
+current index so agents do not confuse historical authority with current
+product behavior.
+
+## Add A Decision When
+
+- a lasting product or architecture choice changes;
+- public compatibility or data ownership changes;
+- security or recovery policy changes;
+- validation is materially added, removed, or weakened; or
+- the source-of-truth hierarchy changes.

@@ -4,7 +4,7 @@ set -euo pipefail
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 
-for command in cargo git jq rg sqlite3; do
+for command in cargo git jq rg; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "pre-merge validation requires: $command" >&2
     exit 1
@@ -19,20 +19,20 @@ cargo fmt --all -- --check
 cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 
-scripts/verify-revision-coherence.sh
-tests/coherence/test-revision-coherence.sh
-tests/coherence/test-core-state-ownership.sh
-tests/core/test-schema-replay-command-contract.sh
-tests/bootstrap/test-bootstrap-harness.sh
-tests/protocol/smoke-native-artifact.sh target/debug/harness-cli
+tests/installer/assert-agent-authority-contract.sh
+tests/installer/assert-install-manifest-links.sh
 tests/installer/test-install-harness-modes.sh
-tests/installer/assert-consumer-changeset-trackable.sh
-tests/maintenance/test-harness-cli-release-classification.sh
-tests/maintenance/test-render-changelog-files.sh
+tests/installer/test-engineering-wisdom-opt-in.sh
 tests/docs/test-doc-contracts.sh
-tests/evals/test-task-authority.sh
+tests/workflow/test-repository-workflow.sh
+tests/workflow/test-task-authority.sh
+tests/maintenance/test-harness-release-classification.sh
+tests/maintenance/test-render-changelog-files.sh
+tests/release/test-harness-release-workflow-contract.sh
+tests/release/test-harness-release-asset-inventory.sh
+tests/release/test-harness-release-identity-guard.sh
 tests/release/test-post-merge-release-recovery.sh
 
 git diff --check
 
-echo "pre-merge repository contract passed"
+echo "pre-merge repository protocol contract passed"

@@ -1,36 +1,40 @@
 # Documentation Map
 
-This directory holds the project harness and any product contract derived from a
-future user-provided spec.
+Start with the smallest authoritative surface.
 
-## Main Files
+## Current Product
 
-- `HARNESS.md`: how humans and agents collaborate.
-- `FEATURE_INTAKE.md`: how prompts become tiny, normal, or high-risk work.
-- `ARCHITECTURE.md`: architecture discovery and boundary rules.
-- `TEST_MATRIX.md`: legacy proof map; current proof status is queried with
-  `scripts/bin/harness-cli query matrix`.
-- `HARNESS_BACKLOG.md`: legacy improvement list; current improvement records
-  are stored with `scripts/bin/harness-cli backlog`.
-- `GLOSSARY.md`: shared terms.
-- `contracts/`: versioned machine-readable contracts for optional external
-  orchestrators.
+- `WORKFLOW.md`: request shape, planning, judgment, operation, validation, and
+  completion.
+- `ARCHITECTURE.md`: current product, code, state, update, and ownership
+  boundaries.
+- `HARNESS.md`: product principles and installed-core model.
+- `product/`: current product behavior and installation contract.
+- `decisions/`: lasting choices future work must inherit.
+- `plans/`: one durable working-memory document for work that needs it.
+- [`patterns/encoding-invariants.md`](patterns/encoding-invariants.md): turn
+  accepted architecture, reliability, security, and quality rules into native
+  mechanical validation.
+- `templates/`: optional decision, plan, runbook, and Harness-improvement
+  structures.
 
-## Folders
+## Consumer-Owned Truth
 
-- `product/`: consumer-project product truth, empty until a consumer spec is
-  derived.
-- `stories/`: feature packets and backlog.
-- `decisions/`: durable decisions and tradeoffs.
-- `demo/`: concrete walkthroughs that show how the harness transforms input
-  into agent-ready work.
-- `templates/`: reusable spec-intake, story, plan, decision, and validation
-  formats.
+The consumer's README, product documents, architecture, code, tests, CI,
+runtime signals, and application behavior remain authoritative. Harness does
+not overwrite those with upstream product assumptions.
 
-## Current State
+## Source Repository
 
-The upstream Harness v0 repository contains an implemented Rust CLI, tests,
-installers, and pull-request/release automation. These documents are also
-distributed as a generic template, so they do not imply that an installed
-consumer repository already has application code, a chosen stack, consumer
-tests, deployment automation, or consumer CI.
+- Root `README.md`: product overview, installation, maintenance, EOL, and
+  development.
+- `crates/harness/`: safe core installer/updater.
+- `scripts/`: platform bootstrap, release, and validation entrypoints.
+- `tests/`: behavior ownership and repository contract.
+
+## History
+
+The former SQLite control plane, protocol v1, story packets, migration evidence,
+and compatibility documentation are preserved by Git history and immutable
+`harness-cli-v*` tags. They are intentionally absent from the current tree so
+search and agent retrieval return current product authority.

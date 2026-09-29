@@ -1,88 +1,59 @@
-# Contributing to repository-harness
+# Contributing
 
-Thanks for helping improve the harness.
+The best contributions make repositories easier for agents and humans to
+understand without adding a parallel control plane.
 
-This repository is early. The most valuable contributions are practical patterns
-that make coding agents safer, clearer, and easier to steer in real projects.
+## Useful Contributions
 
-## Good Contribution Types
+- A real agent failure caused by missing repository authority.
+- A smaller or clearer repository rule that prevents a demonstrated mistake.
+- Installer, updater, merge, checksum, rollback, or recovery hardening.
+- A consumer example that measures undocumented human intervention.
+- A documentation or validation improvement backed by a concrete task.
 
-### 1. Real-world harness examples
+## Before Editing
 
-Show how you installed or adapted the harness in a real project:
+1. Read `AGENTS.md` and `docs/WORKFLOW.md`.
+2. Identify the repository authority for externally observable behavior.
+3. Use a durable plan only when the work spans sessions, coordinates people,
+   has meaningful dependencies, or needs recovery memory.
+4. Keep the change at one product owner.
+5. Select proof that observes the changed behavior.
 
-- What kind of project is it?
-- Which agent/tool did you use? Claude Code, Codex, Cursor, something else?
-- What did the harness help with?
-- What was missing or confusing?
+## Pull Request
 
-### 2. Agent failure cases
-
-Share cases where an agent made a bad change because the repo lacked context:
-
-- What did you ask the agent to do?
-- What did it misunderstand?
-- Which harness artifact could have prevented the issue?
-- Can the lesson become a template, rule, or validation expectation?
-
-### 3. Template improvements
-
-Improve files in `docs/templates/` when you find a repeatable pattern for:
-
-- product specs
-- story packets
-- decision records
-- validation plans
-- agent operating rules
-- high-risk change reviews
-
-### 4. Validation patterns
-
-Add or refine expectations in `docs/TEST_MATRIX.md` for common stacks and work
-types. The goal is not only "tests pass". The goal is clear proof that the work
-matches the product contract.
-
-### 5. Documentation clarity
-
-If a concept is hard to understand, improve the explanation. Small docs changes
-are welcome.
-
-## Before Opening a Pull Request
-
-1. Read `AGENTS.md`.
-2. Classify the work using `docs/FEATURE_INTAKE.md`.
-3. Keep changes focused and reviewable.
-4. Update related docs if you change a harness rule or template.
-5. Explain what proof shows the change is useful.
-
-## Pull Request Checklist
-
-Include this in your PR description:
+Describe:
 
 ```markdown
-## Summary
--
+## Outcome
 
-## Type of contribution
-- [ ] Real-world harness example
-- [ ] Agent failure case
-- [ ] Template improvement
-- [ ] Validation pattern
-- [ ] Documentation clarity
-- [ ] Other
+## Important changes
 
-## Proof / validation
--
+## Validation
 
-## Follow-up questions
--
+## Compatibility, recovery, and remaining risks
 ```
 
-## What Not To Add Yet
+Run:
 
-Avoid adding project-specific product specs to this harness unless they are part
-of a clearly marked demo or example. This repo should stay reusable across many
-projects.
+```bash
+scripts/validate-premerge.sh
+```
 
-Avoid adding tool-specific rules that only work for one coding agent unless the
-tradeoff is explained and the generic harness behavior remains clear.
+## Product Boundary
+
+This repository owns:
+
+- the repository protocol and installed guidance;
+- the Rust `harness` installer/updater;
+- installation, update, conflict, recovery, and release proof.
+
+Consumer repositories own their product behavior, application runtime, fixtures,
+credentials, observability, interface automation, and end-to-end validation.
+
+Do not add a task database, story lifecycle, trace score, generic orchestrator,
+application stack, or product-specific policy without a new accepted product
+decision.
+
+Protocol v1 and `harness-cli` are end-of-life. Historical fixes belong on a
+pinned historical branch or fork, not in the current product.

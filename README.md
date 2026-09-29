@@ -1,23 +1,29 @@
 # repository-harness
 
-Turn any software repo into an agent-ready workspace.
+Turn a software repository into a legible, agent-ready workspace.
 
-`repository-harness` is a repository-level operating harness for Claude Code,
-Codex, Cursor, and other coding agents. It gives agents the missing project
-context they need before they change code: where to start, what the product
-contract says, how risky the work is, what proof is required, and which
-decisions future agents should inherit.
+`repository-harness` installs a small repository protocol and a safe updater.
+The repository remains the system of record: product documents, decisions,
+plans, code, tests, CI, and runtime evidence define the work.
 
-The app is what users touch. The harness is what agents touch.
+It is not a task database, story tracker, agent orchestrator, or application
+runtime.
 
-## Why Star This Repo
+## What It Solves
 
-Star this repo if you want practical, reusable patterns for making AI-assisted
-software development more reliable, inspectable, and easier for humans to steer.
+Coding agents often fail for ordinary engineering reasons:
 
-This project is exploring a simple idea:
+- important intent exists only in chat;
+- the repository does not identify authoritative documents;
+- small changes acquire unnecessary process;
+- long changes lose decisions and recovery context;
+- completion is claimed without behavior-level proof; and
+- an agent invents product policy when the request leaves a material choice
+  open.
 
-> Coding agents do not only need better prompts. They need better repositories.
+Harness provides a compact entrypoint, a navigable repository map, durable plans
+only when work needs them, explicit judgment boundaries, and mechanical
+validation.
 
 ## Built For Infra And Ops-Heavy Repos
 
@@ -53,17 +59,20 @@ Common technology surfaces this harness pattern applies well to:
 
 ## The Problem
 
-Most repos are built for humans reading code in a familiar codebase. Coding
-agents usually enter with only a chat prompt and a shallow snapshot of files.
-That leads to common failure modes:
+````text
+read-only request
+  -> inspect the smallest authoritative surface
+  -> answer with evidence
 
-- The agent edits code before understanding product intent.
-- Important constraints live only in chat history or in someone's head.
-- Validation expectations are vague or discovered too late.
-- Architecture tradeoffs are repeated instead of inherited.
-- Large requests do not get broken into reviewable story-sized work.
+bounded change
+  -> inspect authority and affected behavior
+  -> implement the smallest coherent change
+  -> run relevant proof
 
-## The Harness Approach
+multi-session or coordinated change
+  -> create docs/plans/active/<plan>.md
+  -> keep decisions, progress, recovery, and validation current
+  -> move the validated plan to docs/plans/completed/
 
 A repository starts to have a harness when it helps an agent answer practical
 engineering questions without relying only on chat history:
@@ -98,15 +107,60 @@ From a target project directory, run:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --yes
+material product ambiguity
+  -> stop before mutation
+  -> present the concrete choice and consequences
+````
+
+A typo does not need a plan. A migration spanning sessions does. A request to
+“add rate limiting” without a quota, identity key, enforcement owner, shared
+state topology, or response contract must stop before implementation.
+
+Start with [`AGENTS.md`](AGENTS.md), then
+[`docs/WORKFLOW.md`](docs/WORKFLOW.md).
+
+## What Gets Installed
+
+The default core contains:
+
+- a compact `AGENTS.md` entrypoint;
+- the repository workflow and documentation map;
+- product, decision, and execution-plan structure;
+- optional templates for durable plans, decisions, application runbooks, and
+  evidence-backed Harness improvements; and
+- an invariant-encoding pattern and skill, plus explicit-only onboarding and
+  proposal-audit skills.
+
+It does not install application architecture, product policy, validation
+commands, credentials, a database, schemas, orchestration, or background
+processes.
+
+The exact payload is declared in
+[`scripts/harness-install-files.txt`](scripts/harness-install-files.txt).
+
+## Install
+
+From a target repository:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/hoangnb24/repository-harness/main/scripts/install-harness.sh?$(date +%s)" |
+  bash -s -- --yes
 ```
 
-On Windows PowerShell, run:
+On PowerShell:
 
 ```powershell
 & ([scriptblock]::Create((irm "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.ps1"))) -Yes
 ```
 
-If the target already has `AGENTS.md`, `docs/`, or `scripts/`, choose one:
+Use `--merge` / `-Merge` to preserve existing files and add only missing
+Harness paths. Use `--override` / `-Override` only when replacement is
+intentional. Use `--dry-run` / `-DryRun` to preview.
+
+The bootstrap downloads a versioned `harness` binary and checksum, verifies
+release identity, and delegates installation to that candidate.
+
+## Maintain An Installation
 
 ```bash
 # Update an existing Harness repo without moving existing files
@@ -134,19 +188,28 @@ operating guide, refresh it into the small stable shim:
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --merge --refresh-agent-shim --yes
+scripts/bin/harness status
+scripts/bin/harness doctor
+scripts/bin/harness update --dry-run
+scripts/bin/harness update
 ```
 
-The refresh backs up the existing file. If it detects the old
-Harness-generated guide, it replaces it with the shim. If the file appears
-custom, it appends or updates a marked Harness block instead of overwriting the
-project's local instructions.
+The updater stores the exact upstream base under `.harness-core/`, performs a
+three-way merge, backs up changed files, and activates the result
+transactionally.
 
-If the project is driven with Claude Code, add `--claude`. Claude Code never
-auto-loads `AGENTS.md`, so without this the installed harness is invisible to
-fresh sessions. The flag installs (or refreshes) a `CLAUDE.md` whose marked
-Harness block imports only `AGENTS.md`, the canonical request-authority and
-retrieval entrypoint. An existing `CLAUDE.md` gets the block appended after a
-backup; plain installs without the flag never touch `CLAUDE.md`:
+If local and upstream edits overlap, no managed file or executable changes.
+Harness retains BASE, LOCAL, UPSTREAM, and RESOLVED copies plus the frozen
+managed input set. After a human resolves the semantic choice:
+
+```bash
+scripts/bin/harness update --continue --dry-run
+scripts/bin/harness update --continue
+```
+
+Use `scripts/bin/harness update --abort` to discard only the staged resolution.
+
+## Optional Skills
 
 ```bash
 curl -fsSL "https://raw.githubusercontent.com/benphamse/repository-harness/main/scripts/install-harness.sh?$(date +%s)" | bash -s -- --claude --yes
@@ -208,124 +271,74 @@ The fastest way to understand the harness is to inspect the tiny demo:
   stories, validation expectations, and decisions before implementation starts.
 
 A typical flow looks like this:
+Invariant enforcement routes accepted rules through repository-native
+validation:
 
 ```text
-human intent or product spec
-  -> product contract
-  -> feature intake
-  -> story packet
-  -> validation expectations
-  -> implementation work
-  -> decision or lesson captured for future agents
+$encode-invariant
 ```
 
-Implementation prompts do not go straight to code. They first pass through
-feature intake, become story-sized work when needed, and then carry both product
-validation and harness maintenance expectations.
+Brownfield onboarding is explicit and read-only first:
 
-Harness exposes a versioned orchestration contract for external runners. One
-independent consumer is [Symphony](https://github.com/hoangnb24/symphony); it
-is not part of this repository or the Harness installer.
+```text
+$onboard-repository
+```
 
-## Tool Registry
+Harness improvement is also explicit and requires baseline-to-rerun evidence:
 
-The harness can use optional external tools (linters, code-graph servers,
-deploy checks) without depending on any of them. You register a tool as a
-provider of a *capability*, the harness scans whether it is actually present,
-and a workflow step uses whatever is equipped — an absent tool is a clean skip,
-never a failure.
+```text
+$improve-harness
+```
+
+Engineering advice is a separate opt-in payload:
 
 ```bash
-# register a tool as a provider of a capability
-scripts/bin/harness-cli tool register --name deploy-check --kind cli \
-  --capability deploy-verification --command ./scripts/deploy-check.sh \
-  --responsibility Verification --description "Verify deploy health before release"
-
-# scan presence (writes present/missing/unknown)
-scripts/bin/harness-cli tool check
-
-# a step looks up what is equipped for a purpose
-scripts/bin/harness-cli query tools --capability deploy-verification --status present
+scripts/install-harness.sh --with-engineering-wisdom --yes /path/to/project
 ```
 
-Kinds (`cli`, `binary`, `mcp`, `skill`, `http`) make it agent-generic: each
-agent runtime uses what it can orchestrate. See `docs/TOOL_REGISTRY.md` for the
-full model, the degrade ladder, and how to wire a tool into a flow step.
+No skill runs during installation. Onboarding and Harness improvement remain
+explicit-only; invariant encoding responds only to matching work requests.
 
-## Current State
+## What We Prove
 
-This repository implements the Harness v0 product: a Rust CLI, SQLite durable
-layer, installers, operating documents, contract tests, and release automation.
-Those upstream components are executable product behavior, not placeholders.
-
-Installing Harness into another repository does not create or choose that
-consumer's application, stack, or product specification. It adds the reusable
-engineering layer that helps humans and agents turn the consumer's intent into
-validated work.
-
-## Product Sources
-
-The upstream Harness contract lives in this README, the operating documents,
-the versioned orchestration contract, story packets, and executable tests. The
-generic `docs/product/` directory is reserved for a consumer project's product
-contract; Harness intentionally does not populate it with a fake domain model.
-
-When a user provides a project specification, add or reference it as the input
-spec for the first buildout, then derive smaller living artifacts from it:
-
-- `docs/product/`: current product contract files, created from the spec.
-- `docs/stories/`: story packets and backlog created from selected work.
-- `docs/TEST_MATRIX.md`: behavior-to-proof control panel.
-- `docs/decisions/`: durable decisions and tradeoffs.
-
-Do not keep a project-specific spec or product breakdown in this harness until
-a real project supplies one.
-
-## Repository Structure
-
-```text
-project/
-  AGENTS.md
-  README.md
-  docs/
-    HARNESS.md
-    FEATURE_INTAKE.md
-    ARCHITECTURE.md
-    TEST_MATRIX.md
-    HARNESS_BACKLOG.md
-    product/
-    stories/
-    decisions/
-    demo/
-    templates/
-  scripts/
-    README.md
-```
-
-## Contributing
-
-This project is early and benefits most from real-world agent failure cases,
-example harness installs, docs improvements, and reusable workflow patterns.
-See `CONTRIBUTING.md` for contribution ideas.
-
-Useful contributions include:
-
-- Show how the harness works in a real project.
-- Add missing templates or improve existing ones.
-- Propose validation patterns for different stacks.
-- Share failures where an agent made the wrong change because the repo lacked
-  context.
-- Compare harness behavior across Claude Code, Codex, Cursor, and other tools.
-
-## Share
-
-If this idea resonates, please star the repo and share it with someone building
-with coding agents.
-
-Short description:
+Harness owns three release-evidence boundaries:
 
 > An agent-ready repo harness for Claude Code, Codex, Cursor, and other coding
 > agents: AGENTS.md, product contracts, story packets, validation matrix, and
 > decision records. Built for infra and ops-heavy repos — DevSecOps, Platform,
 > SRE, and AIOps engineering across AWS, Azure, GCP, Kubernetes, Terraform,
 > logging, monitoring, and tracing.
+
+1. **Fresh installation:** the declared core is installed without fabricated
+   application truth or hidden lifecycle state.
+2. **Repository navigation:** an agent follows repository authority, avoids
+   speculative product policy, and can stop at a real decision boundary.
+3. **Safe maintenance:** updates verify identity and checksum, preserve local
+   edits, stage conflicts, reject drift, and recover interrupted transactions.
+
+Operating an arbitrary consumer application end to end remains consumer-owned
+research. Harness does not claim that installation alone supplies runtimes,
+fixtures, credentials, logs, or interface automation.
+
+## Protocol V1 End Of Life
+
+The former SQLite `harness-cli` and machine protocol v1 ended support on
+2026-08-10. The last published compatibility release is
+`harness-cli-v0.1.22`. Existing consumers may pin that immutable release, but
+the current repository no longer builds, installs, tests, or publishes it.
+
+Harness does not automatically delete legacy binaries, databases, schemas, or
+state from consumer repositories.
+
+See
+[`decision 0027`](docs/decisions/0027-end-protocol-v1-and-focus-repository-protocol.md).
+
+## Development
+
+```bash
+scripts/validate-premerge.sh
+```
+
+The contract runs Rust formatting, tests, Clippy, installer and workflow
+checks, release guards, documentation checks, shell syntax, and
+`git diff --check`.

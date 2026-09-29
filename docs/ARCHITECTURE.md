@@ -1,125 +1,74 @@
 # Architecture
 
-The upstream Harness product is implemented as a Rust workspace with a CLI and
-SQLite durable layer. Its primary source is `crates/harness-cli/`, organized
-into domain, application, infrastructure, and interface modules. Schema
-migrations live in `scripts/schema/`, while installers and validation scripts
-form the distribution boundary.
+`repository-harness` has one Rust binary, `harness`, plus thin Bash and
+PowerShell bootstraps.
 
-The reusable template does not select an application stack for a consumer
-project. The discovery guidance below is for that consumer application after a
-user-provided spec and stack decision exist; it does not describe the upstream
-Harness CLI as unimplemented.
-
-## Discovery Before Shape
-
-Before proposing implementation shape, identify:
-
-- Product surfaces: browser, mobile, desktop, CLI, API, worker, or service.
-- Runtime stack: language, framework, database, queues, providers, and hosting.
-- Core domains: the product concepts that deserve stable names and contracts.
-- Boundary inputs: user input, API requests, webhooks, jobs, files, credentials,
-  provider payloads, and environment configuration.
-- Validation ladder: the smallest checks that can prove the selected stack.
-
-Record stack choices in `docs/decisions/` when they meaningfully constrain
-future work.
-
-## Default Layering
+## Product Boundary
 
 ```text
-domain
-  <- application
-      <- infrastructure
-          <- interface
-              <- app surfaces
+consumer repository truth
+  <- installed repository protocol
+  <- safely maintained by harness
 ```
 
-## Consumer Candidate Structure
+Harness installs navigation, working-memory structure, and decision boundaries.
+It does not own the consumer's product, runtime, orchestration, credentials,
+logs, fixtures, or validation commands.
+
+## Rust Dependency Direction
 
 ```text
-app/
-  domain/
-    entities/
-    value-objects/
-    repositories/
-    services/
+domain <- application <- infrastructure
+                    <- interface
 
-  application/
-    commands/
-    queries/
-    handlers/
-
-  infrastructure/
-    database/
-    logging/
-    notifications/
-
-  interface/
-    controllers/
-    dto/
-    presenters/
-    routes/
-    middlewares/
-
-surfaces/
-  browser/
-  mobile/
-  desktop/
-  cli/
+main.rs composes interface and infrastructure
 ```
 
-This is a thinking template, not a scaffold. Create real folders only when a
-story enters implementation and the selected stack needs them.
+- Domain types represent paths, hashes, provenance, merge outcomes, and
+  reports without filesystem, process, serialization, or CLI dependencies.
+- Application use cases depend on ports and own install, update, status,
+  doctor, self-update, version, conflict, and recovery policy.
+- Infrastructure implements embedded release content, hashing, locks,
+  filesystem transactions, Git three-way merge, candidate download, checksum,
+  and executable replacement.
+- Interface parses commands and renders reports.
+- `main.rs` is the composition root.
 
-## Dependency Rule
+Architecture tests reject outward dependencies from inner layers.
 
-Inner layers must not depend on outer layers.
+## Installation State
 
-| Layer | May depend on | Must not depend on |
-| --- | --- | --- |
-| domain | nothing project-external except tiny pure utilities | framework, database, UI, provider, process/env |
-| application | domain | framework, UI, provider, database concrete clients |
-| infrastructure | domain, application | interface controllers or UI |
-| interface | all backend layers | UI state or platform shell assumptions |
-| app surfaces | API contracts and app-facing clients | domain internals directly |
-
-## Parse-First Boundary Rule
-
-Unknown data must be parsed at boundaries before it enters inner code.
-
-Boundaries include:
-
-- HTTP request bodies, params, and query strings.
-- Session payloads and identity claims.
-- Environment variables.
-- Database rows returned from external clients.
-- Platform shell payloads.
-- Deep links, tokens, and signed URLs.
-- Provider webhooks, events, and async payloads.
-
-Target flow:
+Consumer provenance lives under `.harness-core/`:
 
 ```text
-unknown input
-  -> parser
-  -> typed DTO or command
-  -> application use case
-  -> domain object/value object
+.harness-core/
+├── manifest.json
+├── base/
+├── transaction.json          # only while an apply is pending
+├── update/                   # only while conflict resolution is pending
+└── update-candidate/         # retained verified candidate when required
 ```
 
-Inner layers should work with meaningful product types such as `UserId`,
-`AccountId`, `WorkspaceId`, `Role`, `DateRange`, or domain-specific IDs,
-rather than repeatedly validating raw strings.
+The manifest and base contain only Harness-managed core state. They are not a
+task database or product-memory store.
 
-## Command/Query Boundary
+## Update Transaction
 
-If the product has both reads and writes, keep command/query separation clear at
-the code level even when the storage layer is simple:
+```text
+load installed base and candidate
+  -> validate every managed path
+  -> freeze current workspace inputs
+  -> plan three-way changes
+  -> stop and stage overlapping conflicts
+  -> otherwise write journal and backups
+  -> activate workspace files
+  -> commit provenance last
+  -> replace repository-local executable last
+```
 
-- Commands mutate state and own audit side effects.
-- Queries read state and format for consumers.
-- Shared domain rules live in domain/application, not controllers.
+A later mutating command rolls back an interrupted apply before starting new
+work. Symlinks in managed paths, candidate paths, and executable replacement
+paths are rejected.
 
 ## Infra & Ops Surfaces
 
@@ -149,16 +98,26 @@ a real story or spec calls for that specific infrastructure.
 
 ## Observability Contract
 
-The future server should emit one canonical JSON log line per request with:
+Harness preserves BASE, LOCAL, UPSTREAM, and RESOLVED but does not choose
+policy. An agent may explain the difference; a human supplies direction when a
+material product choice remains. Continuation rejects conflict markers,
+candidate tampering, malformed sessions, and drift in any frozen managed file.
 
-- timestamp
-- level
-- request_id
-- user_id when known
-- action
-- duration_ms
-- status_code
-- message
+## Trust Boundary
 
-Audit logs are product records. Application logs are operational records. Do not
-use one as a substitute for the other.
+Updates resolve the exact `harness-v*` release pointer, download the matching
+platform binary and SHA-256 sidecar, require the binary-reported version to
+equal the pointer, and reject downgrades.
+
+SHA-256 verifies bytes relative to the GitHub release. It is not an independent
+publisher-compromise trust root.
+
+## Consumer Application Guidance
+
+Harness does not prescribe a generic application architecture. A consumer
+should document only its actual stack, domains, inputs, run commands, readiness,
+state ownership, logs, validation, and cleanup behavior.
+
+Use `docs/templates/application-runbook.md` when a real application operation
+needs durable guidance. Do not invent commands, credentials, policies, or
+cleanup ownership to complete the template.
