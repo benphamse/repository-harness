@@ -269,7 +269,7 @@ function Install-HarnessCore {
         } else {
             $releaseTag = if ($pendingVersion) { "harness-v$pendingVersion" } else { Get-HarnessReleaseTag }
             if ($releaseTag -notmatch '^harness-v[0-9]+\.[0-9]+\.[0-9]+(?:[-.][A-Za-z0-9]+)*$') { Fail "invalid Harness core release tag: $releaseTag" }
-            $baseUrl = if ($env:HARNESS_CORE_CLI_BASE_URL) { $env:HARNESS_CORE_CLI_BASE_URL.TrimEnd("/") } else { "https://github.com/hoangnb24/repository-harness/releases/download/$releaseTag" }
+            $baseUrl = if ($env:HARNESS_CORE_CLI_BASE_URL) { $env:HARNESS_CORE_CLI_BASE_URL.TrimEnd("/") } else { "https://github.com/$($script:HarnessRepo)/releases/download/$releaseTag" }
             $binaryUrl = "$baseUrl/harness-windows-x64.exe"
             $checksumUrl = "$binaryUrl.sha256"
             $checksum = "$staged.sha256"
@@ -350,8 +350,9 @@ $script:Created = 0
 $script:Updated = 0
 $script:Skipped = 0
 $script:Source = Get-SourceMode
-$script:SourceBaseUrl = if ($env:HARNESS_SOURCE_BASE_URL) { $env:HARNESS_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/hoangnb24/repository-harness/main" }
-$script:CoreSourceBaseUrl = if ($env:HARNESS_CORE_SOURCE_BASE_URL) { $env:HARNESS_CORE_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/hoangnb24/repository-harness/main" }
+$script:HarnessRepo = if ($env:HARNESS_REPO) { $env:HARNESS_REPO } else { "benphamse/repository-harness" }
+$script:SourceBaseUrl = if ($env:HARNESS_SOURCE_BASE_URL) { $env:HARNESS_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/$($script:HarnessRepo)/main" }
+$script:CoreSourceBaseUrl = if ($env:HARNESS_CORE_SOURCE_BASE_URL) { $env:HARNESS_CORE_SOURCE_BASE_URL.TrimEnd("/") } else { "https://raw.githubusercontent.com/$($script:HarnessRepo)/main" }
 $script:PayloadManifest = "scripts/harness-install-files.txt"
 $script:EngineeringWisdomPayloadManifest = "scripts/engineering-wisdom-install-files.txt"
 $script:TargetDir = Resolve-TargetPath $Directory
